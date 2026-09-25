@@ -2,17 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import FilePreviewModal from "../components/FilePreviewModal.jsx";
+import FileCard from "../components/FileCard.jsx";
 
 function formatSize(bytes) {
   if (bytes == null) return "—";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString("fr-FR");
 }
 
 function cleanName(key) {
@@ -26,6 +23,7 @@ function cleanName(key) {
 function guessType(name) {
   const ext = (name || "").split(".").pop().toLowerCase();
   if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
   if (["doc", "docx"].includes(ext)) return "doc";
   if (["xls", "xlsx"].includes(ext)) return "sheet";
   if (["ppt", "pptx"].includes(ext)) return "slides";
@@ -35,7 +33,7 @@ function guessType(name) {
 
 function canPreview(name) {
   const ext = (name || "").split(".").pop().toLowerCase();
-  return ["png", "jpg", "jpeg", "gif", "svg", "webp", "pdf"].includes(ext);
+  return ["png", "jpg", "jpeg", "gif", "svg", "webp", "pdf", "mp4", "webm", "ogg", "mov"].includes(ext);
 }
 
 function getUserRootPath(user) {
@@ -56,6 +54,7 @@ export default function MyFiles() {
   const outlet = useOutletContext() || {};
   const user = outlet.user;
   const setFilesGlobal = outlet.setFiles;
+  const uploadFile = outlet.uploadFile;
 
   const [path, setPath] = useState(() => getUserRootPath(user));
   const [folders, setFolders] = useState([]);
@@ -72,11 +71,12 @@ export default function MyFiles() {
   const [confirm, setConfirm] = useState(null);
   const [moveModal, setMoveModal] = useState(null);
   const [shareModal, setShareModal] = useState(null);
-  const [shareEmail, setShareEmail] = useState("");
+  const [shareEmail, setShareEmail] = "";
   const [sharePermission, setSharePermission] = useState("Read Only");
   const [sharing, setSharing] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [, setTick] = useState(0);
+  const [previewModal, setPreviewModal] = useState(null);
 
   const uploadInputRef = useRef(null);
   const menuPanelRef = useRef(null);
@@ -131,6 +131,7 @@ export default function MyFiles() {
           size: f.size,
           lastModified: f.lastModified,
           type: guessType(name),
+          sizeLabel: formatSize(f.size),
         };
       });
       setFolders(folderList);
@@ -255,52 +256,16 @@ export default function MyFiles() {
   async function handleUploadHere(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const token = localStorage.getItem("token");
-    const form = new FormData();
-    form.append("file", file);
-    form.append("path", path);
-    try {
-      const res = await fetch(`${API_BASE}/api/files/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast(data.error || "Upload failed", "error");
-        return;
-      }
+    uploadFile?.(file, path, () => {
       showToast(`"${file.name}" uploaded`);
       load(path);
-    } catch {
-      showToast("Cannot connect to server", "error");
-    } finally {
-      e.target.value = "";
-    }
+    });
+    e.target.value = "";
   }
 
-  async function handlePreview(file) {
+  function handlePreview(file) {
     setMenu(null);
-    const token = localStorage.getItem("token");
-    if (!token || !file?.key) return;
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/files/download?key=${encodeURIComponent(file.key)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        showToast(data.error || "Preview failed", "error");
-        return;
-      }
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const win = window.open(url, "_blank", "noopener,noreferrer");
-      if (!win) showToast("Popup blocked — allow popups", "error");
-      setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
-    } catch {
-      showToast("Cannot connect to server", "error");
-    }
+    setPreviewModal({ key: file.key, name: file.name });
   }
 
   function requestDownload(file) {
@@ -582,18 +547,44 @@ export default function MyFiles() {
           gap: 6px;
           flex-wrap: wrap;
         }
-        .myfiles-table-wrap {
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
+        .file-card-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+          gap: 14px;
+          padding: 18px;
         }
-        .myfiles-table-wrap .data-table {
-          min-width: 520px;
+        .file-card {
+          position: relative;
+          min-width: 0;
+          overflow: hidden;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          background: #fff;
+          transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
         }
-        .myfiles-table-wrap .data-table td:last-child,
-        .myfiles-table-wrap .data-table th:last-child {
-          width: 56px;
-          text-align: right;
+        .file-card:hover {
+          transform: translateY(-2px);
+          border-color: #cbd5e1;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
         }
+        .file-card-preview {
+          display: flex;
+          width: 100%;
+          height: 142px;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          border-bottom: 1px solid #eef2f7;
+          background: linear-gradient(135deg, #f8fafc, #eef2ff);
+          cursor: pointer;
+        }
+        .file-card-thumbnail { width: 100%; height: 100%; object-fit: cover; }
+        .file-card-details { padding: 12px 42px 13px 13px; }
+        .file-card-name { overflow: hidden; color: #0f172a; font-size: 0.9rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+        .file-card-meta { margin-top: 5px; color: #64748b; font-size: 0.78rem; }
+        .file-card-favorite { margin-right: 5px; color: #f59e0b; }
+        .file-card-menu { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.92); color: #475569; cursor: pointer; font-size: 18px; line-height: 1; padding: 6px 9px; }
+        .file-card-menu:hover { background: #fff; color: #0f172a; }
         .menu-floating {
           position: fixed;
           z-index: 10050;
@@ -632,16 +623,8 @@ export default function MyFiles() {
           }
           .page-heading { font-size: 1.35rem !important; }
           .page-subtext { font-size: 0.85rem; }
-          .myfiles-table-wrap .data-table {
-            min-width: 100%;
-            font-size: 0.85rem;
-          }
-          .myfiles-table-wrap .data-table th:nth-child(2),
-          .myfiles-table-wrap .data-table td:nth-child(2),
-          .myfiles-table-wrap .data-table th:nth-child(3),
-          .myfiles-table-wrap .data-table td:nth-child(3) {
-            display: none;
-          }
+          .file-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 10px; }
+          .file-card-preview { height: 112px; }
           .menu-floating {
             min-width: min(240px, calc(100vw - 24px));
           }
@@ -687,11 +670,22 @@ export default function MyFiles() {
           <p className="page-subtext">{t("myFilesSub")}</p>
         </div>
         <div className="myfiles-actions">
-          <input ref={uploadInputRef} type="file" hidden onChange={handleUploadHere} />
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json,.zip,.txt,.css,.js"
+            hidden
+            onChange={handleUploadHere}
+          />
           <button
             className="btn btn-outline"
             type="button"
-            onClick={() => uploadInputRef.current?.click()}
+            onClick={() => {
+              if (uploadInputRef.current) {
+                uploadInputRef.current.value = "";
+                uploadInputRef.current.click();
+              }
+            }}
           >
             {t("uploadHere")}
           </button>
@@ -744,70 +738,14 @@ export default function MyFiles() {
             <div className="empty-state-text">{t("emptyFolderHint")}</div>
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("name")}</th>
-                <th>{t("size")}</th>
-                <th>{t("modified")}</th>
-                <th>{t("actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {folders.map((folder) => (
-                <tr key={folder.key}>
-                  <td
-                    style={{ fontWeight: 600, cursor: "pointer" }}
-                    onClick={() => openFolder(folder.key)}
-                    onDoubleClick={() => openFolder(folder.key)}
-                  >
-                    <span style={{ marginRight: 8 }}>📁</span>
-                    {folder.name}
-                  </td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td>
-                    <button
-                      type="button"
-                      data-menu-btn
-                      title="More"
-                      aria-label="More"
-                      onClick={(e) => openMenu(e, folder, true)}
-                      style={dotsBtnStyle}
-                    >
-                      ⋮
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
-              {files.map((f) => (
-                <tr key={f.key}>
-                  <td style={{ fontWeight: 600 }}>
-                    <span style={{ marginRight: 8 }}>
-                      {favoriteKeys.has(f.key) ? "⭐ " : ""}
-                      {f.type === "pdf" ? "📄" : f.type === "image" ? "🖼️" : "📎"}
-                    </span>
-                    {f.name}
-                  </td>
-                  <td>{formatSize(f.size)}</td>
-                  <td>{formatDate(f.lastModified)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      data-menu-btn
-                      title="More"
-                      aria-label="More"
-                      onClick={(e) => openMenu(e, f, false)}
-                      style={dotsBtnStyle}
-                    >
-                      ⋮
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="file-card-grid">
+            {folders.map((folder) => (
+              <FileCard key={folder.key} item={folder} folder onOpen={openFolder} onMenu={openMenu} />
+            ))}
+            {files.map((file) => (
+              <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} onOpen={handlePreview} onMenu={openMenu} />
+            ))}
+          </div>
         )}
       </div>
 
@@ -1038,6 +976,14 @@ export default function MyFiles() {
           </div>
         </Modal>
       )}
+
+      {previewModal && (
+        <FilePreviewModal
+          fileKey={previewModal.key}
+          fileName={previewModal.name}
+          onClose={() => setPreviewModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1073,16 +1019,6 @@ function Modal({ children, onClose }) {
     </div>
   );
 }
-
-const dotsBtnStyle = {
-  border: "none",
-  background: "transparent",
-  cursor: "pointer",
-  fontSize: 18,
-  padding: "6px 12px",
-  lineHeight: 1,
-  borderRadius: 8,
-};
 
 const inputStyle = {
   width: "100%",

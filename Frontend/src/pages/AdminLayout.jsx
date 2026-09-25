@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import Topbar from "./Topbar.jsx";
@@ -144,6 +144,15 @@ function mapS3File(item) {
   };
 }
 
+function tokenHasExpired(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+}
+
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -154,6 +163,10 @@ export default function AdminLayout() {
   const [user, setUser] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [, setTick] = useState(0);
+  const [uploadTransfer, setUploadTransfer] = useState(null);
+  const uploadRequestRef = useRef(null);
+  const uploadFinishRef = useRef(null);
+  const redirectingRef = useRef(false);
 
   useEffect(() => {
     function onLang() {
@@ -172,8 +185,16 @@ export default function AdminLayout() {
     const token = localStorage.getItem("token");
     const rawUser = localStorage.getItem("user");
 
-    if (!token || !rawUser) {
-      navigate("/login");
+    function redirectToLogin() {
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      navigate("/login", { replace: true });
+    }
+
+    if (!token || !rawUser || tokenHasExpired(token)) {
+      redirectToLogin();
       return;
     }
 
@@ -181,8 +202,37 @@ export default function AdminLayout() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setUser(buildDisplayUser(JSON.parse(rawUser)));
     } catch {
-      navigate("/login");
+      redirectToLogin();
     }
+  }, [navigate]);
+
+  useEffect(() => {
+    const originalFetch = window.fetch;
+
+    function redirectToLogin() {
+      if (redirectingRef.current) return;
+      redirectingRef.current = true;
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      uploadRequestRef.current?.abort();
+      navigate("/login", { replace: true });
+    }
+
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) redirectToLogin();
+      return response;
+    };
+
+    const interval = window.setInterval(() => {
+      const token = localStorage.getItem("token");
+      if (!token || tokenHasExpired(token)) redirectToLogin();
+    }, 30000);
+
+    return () => {
+      window.fetch = originalFetch;
+      window.clearInterval(interval);
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -213,10 +263,73 @@ export default function AdminLayout() {
     document.body.classList.toggle("dark-mode", darkMode);
   }, [darkMode]);
 
+  useEffect(() => () => {
+    uploadRequestRef.current?.abort();
+    window.clearTimeout(uploadFinishRef.current);
+  }, []);
+
   const meta = getPageMeta(location.pathname);
 
   function addFile(file) {
     setFiles((prev) => [file, ...prev]);
+  }
+
+  function uploadFile(file, path, onSuccess) {
+    if (!file) return;
+    uploadRequestRef.current?.abort();
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("file", file);
+    if (path) formData.append("path", path);
+
+    const request = new XMLHttpRequest();
+    uploadRequestRef.current = request;
+    setUploadTransfer({ name: file.name, loaded: 0, total: file.size || 0, progress: 0 });
+    request.open("POST", `${API_BASE}/api/files/upload`);
+    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.responseType = "json";
+    request.upload.onprogress = (event) => {
+      const total = event.lengthComputable ? event.total : file.size || 0;
+      setUploadTransfer((current) => current ? {
+        ...current,
+        loaded: event.loaded,
+        total,
+        progress: total ? Math.round((event.loaded / total) * 100) : 0,
+      } : current);
+    };
+    request.onload = () => {
+      uploadRequestRef.current = null;
+      const data = request.response || {};
+      if (request.status < 200 || request.status >= 300) {
+        if (request.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          navigate("/login", { replace: true });
+          return;
+        }
+        setUploadTransfer({ error: data.error || "Upload failed" });
+        return;
+      }
+      onSuccess?.(data);
+      setUploadTransfer((current) => current ? { ...current, progress: 100, complete: true } : current);
+      uploadFinishRef.current = window.setTimeout(() => setUploadTransfer(null), 900);
+    };
+    request.onerror = () => {
+      uploadRequestRef.current = null;
+      setUploadTransfer({ error: "Cannot connect to server" });
+    };
+    request.onabort = () => {
+      uploadRequestRef.current = null;
+      setUploadTransfer(null);
+    };
+    request.send(formData);
+  }
+
+  function cancelUpload() {
+    window.clearTimeout(uploadFinishRef.current);
+    uploadRequestRef.current?.abort();
+    uploadRequestRef.current = null;
+    setUploadTransfer(null);
   }
 
   if (!user) return null;
@@ -242,13 +355,54 @@ export default function AdminLayout() {
           onMenuClick={() => setSidebarOpen((v) => !v)}
         />
         <div className="admin-content">
-          <Outlet context={{ user, files, addFile, filesLoading, setFiles }} />
+          <Outlet context={{ user, files, addFile, filesLoading, setFiles, uploadFile }} />
         </div>
       </div>
 
       {uploadOpen && (
-        <UploadFile onClose={() => setUploadOpen(false)} onUpload={addFile} />
+        <UploadFile
+          onClose={() => setUploadOpen(false)}
+          onUpload={addFile}
+          onUploadFile={(file) => uploadFile(file, `uploads/${user.userId}/`, (data) => {
+            addFile({
+              id: data.fileKey,
+              name: data.fileName,
+              type: "file",
+              size: data.size,
+              modified: "Just now",
+              starred: false,
+              fileKey: data.fileKey,
+            });
+          })}
+        />
       )}
+
+      {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
+    </div>
+  );
+}
+
+function UploadProgress({ transfer, onCancel }) {
+  if (transfer.error) {
+    return (
+      <div className="upload-progress-panel upload-progress-error" role="alert">
+        <strong>{transfer.error}</strong>
+        <button type="button" onClick={onCancel}>Fermer</button>
+      </div>
+    );
+  }
+
+  const hasTotal = Boolean(transfer.total);
+  return (
+    <div className="upload-progress-panel" role="status" aria-live="polite">
+      <div className="upload-progress-head">
+        <span className="upload-progress-name" title={transfer.name}>{transfer.name}</span>
+        <span className="upload-progress-value">{transfer.complete ? "100%" : hasTotal ? `${transfer.progress}%` : "Envoi..."}</span>
+      </div>
+      <div className="upload-progress-track" aria-hidden="true">
+        <div className={`upload-progress-bar${hasTotal ? "" : " indeterminate"}`} style={hasTotal ? { width: `${transfer.progress}%` } : undefined} />
+      </div>
+      {!transfer.complete && <button className="upload-cancel" type="button" onClick={onCancel}>Annuler le transfert</button>}
     </div>
   );
 }

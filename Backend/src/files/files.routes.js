@@ -18,30 +18,8 @@ import { getTemporaryS3Client } from "../config/stsClient.js";
 
 const router = Router();
 
-const ALLOWED_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/zip",
-  "application/json",
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/svg+xml",
-  "text/plain",
-  "text/css",
-  "text/javascript",
-]);
-
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
-
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_SIZE_BYTES },
 });
 
 function sanitizeFileName(name) {
@@ -222,10 +200,8 @@ router.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
     const s3 = await getTemporaryS3Client(`user-${req.user.userId}`);
     if (!req.file) return res.status(400).json({ error: "No file received" });
 
-    const { originalname, mimetype, buffer, size } = req.file;
-    if (!ALLOWED_TYPES.has(mimetype)) {
-      return res.status(415).json({ error: `File type "${mimetype}" is not allowed.` });
-    }
+    const { originalname, buffer, size } = req.file;
+    const contentType = req.file.mimetype || "application/octet-stream";
 
     let basePath = (req.body.path || `uploads/${req.user.userId}/`).trim();
     if (!basePath.endsWith("/")) basePath += "/";
@@ -247,7 +223,7 @@ router.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
         Bucket: BUCKET_NAME,
         Key: fileKey,
         Body: buffer,
-        ContentType: mimetype,
+        ContentType: contentType,
         ServerSideEncryption: "AES256",
       })
     );
@@ -264,7 +240,7 @@ router.post("/upload", requireAuth, upload.single("file"), async (req, res) => {
       fileKey,
       fileName: originalname,
       size,
-      type: mimetype,
+      type: contentType,
     });
   } catch (err) {
     console.error("Upload error:", err.message);
@@ -290,7 +266,8 @@ router.get("/preview", requireAuth, async (req, res) => {
     const ext = (displayName.split(".").pop() || "").toLowerCase();
     const isImage = ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext);
     const isPdf = ext === "pdf";
-    if (!isImage && !isPdf) {
+    const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
+    if (!isImage && !isPdf && !isVideo) {
       return res.status(415).json({
         error: "Preview not available for this file type.",
         fileName: displayName,
@@ -305,10 +282,14 @@ router.get("/preview", requireAuth, async (req, res) => {
       { expiresIn: 600 }
     );
 
+    let type = "image";
+    if (isPdf) type = "pdf";
+    if (isVideo) type = "video";
+
     res.json({
       previewUrl,
       fileName: displayName,
-      type: isPdf ? "pdf" : "image",
+      type,
       previewable: true,
     });
   } catch (err) {
@@ -360,17 +341,15 @@ router.post("/replace", requireAuth, upload.single("file"), async (req, res) => 
       });
     }
 
-    const { mimetype, buffer } = req.file;
-    if (!ALLOWED_TYPES.has(mimetype)) {
-      return res.status(415).json({ error: `File type "${mimetype}" is not allowed.` });
-    }
+    const { buffer } = req.file;
+    const contentType = req.file.mimetype || "application/octet-stream";
 
     await s3.send(
       new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: fileKey,
         Body: buffer,
-        ContentType: mimetype,
+        ContentType: contentType,
         ServerSideEncryption: "AES256",
       })
     );

@@ -5,7 +5,7 @@ export default function FilePreviewModal({ fileKey, fileName, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
-  const [type, setType] = useState(""); // "image" | "pdf"
+  const [type, setType] = useState(""); // "image" | "pdf" | "video"
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +93,16 @@ export default function FilePreviewModal({ fileKey, fileName, onClose }) {
               borderRadius: 8,
             }}
           />
+        )}
+
+        {!loading && !error && type === "video" && (
+          <div style={{ textAlign: "center", overflow: "auto", maxHeight: "75vh" }}>
+            <video
+              src={previewUrl}
+              controls
+              style={{ maxWidth: "100%", maxHeight: "70vh", borderRadius: 8 }}
+            />
+          </div>
         )}
       </div>
     </div>

@@ -1,8 +1,6 @@
 import { useRef, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
-
-export default function UploadFile({ onClose, onUpload }) {
+export default function UploadFile({ onClose, onUploadFile }) {
   const inputRef = useRef(null);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -28,58 +26,12 @@ export default function UploadFile({ onClose, onUpload }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  async function handleConfirm() {
+  function handleConfirm() {
     if (!selectedFile) return;
-
-    setLoading(true);
     setError("");
-
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        setError("You must be logged in to upload.");
-        setLoading(false);
-        return;
-      }
-
-      // On crée un FormData pour envoyer le fichier
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const res = await fetch(`${API_BASE}/api/files/upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          // Ne PAS mettre Content-Type : le navigateur le met automatiquement avec FormData
-        },
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Upload failed");
-        setLoading(false);
-        return;
-      }
-
-      // Succès → on informe le parent (AdminLayout) pour mettre à jour la liste
-      onUpload({
-        id: data.fileKey,
-        name: data.fileName,
-        type: guessType(data.fileName),
-        size: formatSize(data.size),
-        modified: "Just now",
-        starred: false,
-        fileKey: data.fileKey,
-      });
-
-      onClose();
-    } catch {
-      setError("Cannot connect to server. Is the backend running?");
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    onUploadFile?.(selectedFile);
+    onClose();
   }
 
   return (
@@ -140,17 +92,6 @@ export default function UploadFile({ onClose, onUpload }) {
       </div>
     </div>
   );
-}
-
-function guessType(name) {
-  const ext = name.split(".").pop().toLowerCase();
-  if (["png", "jpg", "jpeg", "gif", "svg"].includes(ext)) return "image";
-  if (["doc", "docx"].includes(ext)) return "doc";
-  if (["xls", "xlsx"].includes(ext)) return "sheet";
-  if (["ppt", "pptx"].includes(ext)) return "slides";
-  if (["json", "js", "jsx", "ts", "css"].includes(ext)) return "code";
-  if (ext === "pdf") return "pdf";
-  return "file";
 }
 
 function UploadCloudIcon() {
