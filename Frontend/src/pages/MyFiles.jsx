@@ -333,7 +333,11 @@ export default function MyFiles() {
         showToast(data.error || "Could not move to trash", "error");
         return;
       }
-      showToast(`"${item.name}" → trash`);
+      showToast(
+        item.key.endsWith("/")
+          ? `"${item.name}" ${t("deleteFolder")}`
+          : `"${item.name}" → trash`
+      );
       load(path);
     } catch {
       showToast("Cannot connect to server", "error");

@@ -11,6 +11,7 @@ import {
   GetObjectCommand,
   CopyObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { BUCKET_NAME } from "../config/s3Client.js";
@@ -21,6 +22,38 @@ const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
 });
+
+async function listAllKeys(s3, prefix) {
+  const keys = [];
+  let continuationToken;
+
+  do {
+    const response = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+    keys.push(...(response.Contents || []).flatMap((item) => (item.Key ? [item.Key] : [])));
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return keys;
+}
+
+async function deleteKeys(s3, keys) {
+  for (let index = 0; index < keys.length; index += 1000) {
+    const batch = keys.slice(index, index + 1000);
+    if (batch.length === 0) continue;
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: BUCKET_NAME,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      })
+    );
+  }
+}
 
 function sanitizeFileName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -382,24 +415,34 @@ router.post("/trash", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Only files in uploads/ can be moved to trash." });
     }
 
-    const trashKey = key.replace(/^uploads\//, "trash/");
-    await s3.send(
-      new CopyObjectCommand({
-        Bucket: BUCKET_NAME,
-        CopySource: `${BUCKET_NAME}/${key}`,
-        Key: trashKey,
-      })
-    );
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    const isFolder = key.endsWith("/");
+    const sourceKeys = isFolder ? await listAllKeys(s3, key) : [key];
+
+    if (isFolder) {
+      await deleteKeys(s3, sourceKeys);
+    } else {
+      const trashKey = key.replace(/^uploads\//, "trash/");
+      await s3.send(
+        new CopyObjectCommand({
+          Bucket: BUCKET_NAME,
+          CopySource: `${BUCKET_NAME}/${key}`,
+          Key: trashKey,
+        })
+      );
+      await deleteKeys(s3, sourceKeys);
+    }
 
     await logActivity({
       userId: req.user.userId,
       userName: req.user.email || `User #${req.user.userId}`,
-      action: "Moved file to trash",
+      action: isFolder ? "Permanently deleted folder" : "Moved file to trash",
       detail: key,
     });
 
-    res.json({ message: "File moved to trash", trashKey });
+    res.json({
+      message: isFolder ? "Folder permanently deleted" : "File moved to trash",
+      ...(isFolder ? {} : { trashKey }),
+    });
   } catch (err) {
     console.error("Trash error:", err.message);
     res.status(500).json({ error: "Could not move file to trash.", details: err.message });
@@ -479,12 +522,13 @@ router.delete("/", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "You don't have permission to delete this file." });
     }
 
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    const keys = key.endsWith("/") ? await listAllKeys(s3, key) : [key];
+    await deleteKeys(s3, keys);
 
     await logActivity({
       userId: req.user.userId,
       userName: req.user.email || `User #${req.user.userId}`,
-      action: "Permanently deleted file",
+      action: key.endsWith("/") ? "Permanently deleted folder" : "Permanently deleted file",
       detail: key,
     });
 
