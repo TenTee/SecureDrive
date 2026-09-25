@@ -23,7 +23,7 @@ function TypeIcon({ type = "file", folder = false, size = 52 }) {
   );
 }
 
-export default function FileCard({ item, folder = false, favorite = false, onOpen, onMenu }) {
+export default function FileCard({ item, folder = false, favorite = false, onOpen, onMenu, meta, actions, showMenu = true, previewable = false }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const isMedia = !folder && (item.type === "image" || item.type === "video");
 
@@ -48,7 +48,7 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
 
   function handleOpen() {
     if (folder) onOpen?.(item.key);
-    else if (isMedia) onOpen?.(item);
+    else if (previewable) onOpen?.(item);
   }
 
   return (
@@ -61,9 +61,10 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
           {favorite && <span className="file-card-favorite" aria-label="Favorite">★</span>}
           {item.name}
         </div>
-        <div className="file-card-meta">{folder ? "Folder" : item.sizeLabel}</div>
+        <div className="file-card-meta">{meta || (folder ? "Folder" : item.sizeLabel)}</div>
+        {actions && <div className="file-card-actions">{actions}</div>}
       </div>
-      <button className="file-card-menu" type="button" data-menu-btn title="More" aria-label={`More actions for ${item.name}`} onClick={(event) => onMenu?.(event, item, folder)}>⋮</button>
+      {showMenu && <button className="file-card-menu" type="button" data-menu-btn title="More" aria-label={`More actions for ${item.name}`} onClick={(event) => onMenu?.(event, item, folder)}>⋮</button>}
     </article>
   );
 }

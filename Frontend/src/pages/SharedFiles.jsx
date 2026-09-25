@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import FileCard from "../components/FileCard.jsx";
+import FilePreviewModal from "../components/FilePreviewModal.jsx";
+
+function guessType(name) {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
+  if (ext === "pdf") return "pdf";
+  return "file";
+}
 
 export default function SharedFiles() {
   const [shares, setShares] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [previewModal, setPreviewModal] = useState(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -86,52 +97,17 @@ export default function SharedFiles() {
             <div className="empty-state-text">{t("nothingSharedByMeHint")}</div>
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("fileName")}</th>
-                <th>{t("sharedWith")}</th>
-                <th>{t("permissions")}</th>
-                <th>{t("dateShared")}</th>
-                <th style={{ textAlign: "right" }}>{t("actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shares.map((item) => (
-                <tr key={item.id}>
-                  <td style={{ fontWeight: 600 }}>{item.file_name}</td>
-                  <td>
-                    {item.target_first_name} {item.target_last_name}
-                    <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
-                      {item.target_email}
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      className={`tag ${
-                        item.permission === "Read Only" ? "tag-gray" : "tag-amber"
-                      }`}
-                    >
-                      {permLabel(item.permission)}
-                    </span>
-                  </td>
-                  <td>{formatDate(item.created_at)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="btn btn-outline"
-                        onClick={() => handleRemoveShare(item.id)}
-                      >
-                        {t("removeAccess")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="file-card-grid">
+            {shares.map((item) => {
+              const name = item.file_name || "file";
+              const folder = item.isFolder === true || item.file_key?.endsWith("/");
+              const type = guessType(name);
+              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<button className="btn btn-outline" onClick={() => handleRemoveShare(item.id)}>{t("removeAccess")}</button>} />;
+            })}
+          </div>
         )}
       </div>
+      {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
     </div>
   );
 }

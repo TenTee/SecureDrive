@@ -1,6 +1,16 @@
 import { useState, useEffect } from "react";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import FileCard from "../components/FileCard.jsx";
+import FilePreviewModal from "../components/FilePreviewModal.jsx";
+
+function guessType(name) {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
+  if (ext === "pdf") return "pdf";
+  return "file";
+}
 
 function formatSize(bytes) {
   if (bytes == null) return "—";
@@ -15,7 +25,7 @@ function formatDate(value) {
 }
 
 function cleanName(key) {
-  const raw = (key || "").split("/").pop() || key;
+  const raw = (key || "").split("/").filter(Boolean).pop() || key;
   return raw.replace(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i,
     ""
@@ -26,6 +36,7 @@ export default function Trash() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [previewModal, setPreviewModal] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirmModal, setConfirmModal] = useState(null);
   const [, setTick] = useState(0);
@@ -218,43 +229,18 @@ export default function Trash() {
             <div className="empty-state-text">{t("trashEmptyHint")}</div>
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("fileName")}</th>
-                <th>{t("fileSize")}</th>
-                <th>{t("deletedDate")}</th>
-                <th style={{ textAlign: "right" }}>{t("actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.key}>
-                  <td style={{ fontWeight: 600 }}>{cleanName(item.key)}</td>
-                  <td>{formatSize(item.size)}</td>
-                  <td>{formatDate(item.lastModified)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="btn btn-outline"
-                        onClick={() => setConfirmModal({ type: "restore", item })}
-                      >
-                        ↺ {t("restore")}
-                      </button>
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => setConfirmModal({ type: "delete", item })}
-                      >
-                        🗑 {t("delete")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="file-card-grid">
+            {items.map((item) => {
+              const folder = item.key?.endsWith("/");
+              const name = cleanName(item.key);
+              const type = guessType(name);
+              return <FileCard key={item.key} item={{ key: item.key, name, type, sizeLabel: `${formatSize(item.size)} · ${formatDate(item.lastModified)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={folder ? t("folder") : t("deletedDate")} actions={<><button className="btn btn-outline" onClick={() => setConfirmModal({ type: "restore", item })}>{t("restore")}</button><button className="btn btn-danger" onClick={() => setConfirmModal({ type: "delete", item })}>{t("delete")}</button></>} />;
+            })}
+          </div>
         )}
       </div>
+
+      {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
 
       {confirmModal && (
         <div className="modal-overlay" onClick={() => !busy && setConfirmModal(null)}>

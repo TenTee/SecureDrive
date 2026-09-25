@@ -71,7 +71,7 @@ export default function MyFiles() {
   const [confirm, setConfirm] = useState(null);
   const [moveModal, setMoveModal] = useState(null);
   const [shareModal, setShareModal] = useState(null);
-  const [shareEmail, setShareEmail] = "";
+  const [shareEmail, setShareEmail] = useState("");
   const [sharePermission, setSharePermission] = useState("Read Only");
   const [sharing, setSharing] = useState(false);
   const [toasts, setToasts] = useState([]);

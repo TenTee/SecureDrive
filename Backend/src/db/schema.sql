@@ -22,3 +22,20 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Speeds up the most common lookup: finding a user by email at login time.
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
+-- Stores file and folder permissions. A folder share uses a file_key ending in '/'.
+CREATE TABLE IF NOT EXISTS shares (
+  id             SERIAL PRIMARY KEY,
+  file_key       TEXT NOT NULL,
+  file_name      VARCHAR(255) NOT NULL,
+  owner_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shared_with_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission     VARCHAR(20) NOT NULL
+                 CHECK (permission IN ('Read Only', 'Read & Write')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT shares_file_recipient_unique UNIQUE (file_key, shared_with_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_shares_shared_with ON shares(shared_with_id);
+CREATE INDEX IF NOT EXISTS idx_shares_owner ON shares(owner_id);
+CREATE INDEX IF NOT EXISTS idx_shares_file_key ON shares(file_key);

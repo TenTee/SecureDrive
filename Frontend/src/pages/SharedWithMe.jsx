@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import FileCard from "../components/FileCard.jsx";
+import FilePreviewModal from "../components/FilePreviewModal.jsx";
 
 function cleanName(key) {
   const raw = (key || "").split("/").filter(Boolean).pop() || key || "file";
@@ -17,10 +19,12 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+
 export default function SharedWithMe() {
   const [shares, setShares] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [previewModal, setPreviewModal] = useState(null);
   const [replacingId, setReplacingId] = useState(null);
   const fileInputRef = useRef(null);
   const pendingReplaceRef = useRef(null);
@@ -90,6 +94,7 @@ export default function SharedWithMe() {
           key: f.key,
           name: cleanName(f.key),
           size: f.size,
+          type: guessType(cleanName(f.key)),
         }))
       );
     } catch {
@@ -213,69 +218,36 @@ export default function SharedWithMe() {
               <div className="empty-state-title">{t("emptyFolder")}</div>
             </div>
           ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("name")}</th>
-                  <th>{t("size")}</th>
-                  <th style={{ textAlign: "right" }}>{t("actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {folderFolders.map((f) => (
-                  <tr key={f.key}>
-                    <td style={{ fontWeight: 600 }}>📁 {f.name}</td>
-                    <td>—</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="btn btn-outline"
-                        style={{ fontSize: "0.8rem" }}
-                        onClick={() =>
-                          openSharedFolder({
-                            file_key: f.key,
-                            file_name: f.name,
-                            permission: browsePerm,
-                          })
-                        }
-                      >
-                        {t("open")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {folderFiles.map((f) => (
-                  <tr key={f.key}>
-                    <td style={{ fontWeight: 600 }}>📄 {f.name}</td>
-                    <td>{formatSize(f.size)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title={t("download")}
-                        onClick={() => handleDownload(f.key, f.name)}
-                      >
-                        <DownloadIcon />
-                      </button>
-                      {browsePerm === "Read & Write" && (
-                        <button
-                          type="button"
-                          className="btn btn-outline"
-                          style={{ marginLeft: 6, fontSize: "0.8rem" }}
-                          onClick={() => startReplace({ file_key: f.key, id: f.key })}
-                        >
-                          {t("update")}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="file-card-grid">
+              {folderFolders.map((folder) => (
+                <FileCard
+                  key={folder.key}
+                  item={{ key: folder.key, name: folder.name, type: "folder" }}
+                  folder
+                  showMenu={false}
+                  onOpen={(key) => openSharedFolder({ file_key: key, file_name: folder.name, permission: browsePerm })}
+                  actions={<button type="button" className="btn btn-outline" onClick={() => openSharedFolder({ file_key: folder.key, file_name: folder.name, permission: browsePerm })}>{t("open")}</button>}
+                />
+              ))}
+              {folderFiles.map((file) => (
+                <FileCard
+                  key={file.key}
+                  item={{ key: file.key, name: file.name, type: file.type, sizeLabel: formatSize(file.size) }}
+                  showMenu={false}
+                  previewable={file.type !== "file"}
+                  onOpen={(selected) => setPreviewModal({ key: selected.key, name: selected.name })}
+                  actions={<>
+                    <button type="button" className="btn btn-outline" onClick={() => handleDownload(file.key, file.name)}>{t("download")}</button>
+                    {browsePerm === "Read & Write" && <button type="button" className="btn btn-outline" onClick={() => startReplace({ file_key: file.key, id: file.key })}>{t("update")}</button>}
+                  </>}
+                />
+              ))}
+            </div>
           )}
         </div>
 
         <input ref={fileInputRef} type="file" hidden onChange={onFileChosen} />
+        {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
       </div>
     );
   }
@@ -301,103 +273,16 @@ export default function SharedWithMe() {
             <div className="empty-state-text">{t("nothingSharedHint")}</div>
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t("name")}</th>
-                <th>{t("sharedBy")}</th>
-                <th>{t("permissions")}</th>
-                <th>{t("dateShared")}</th>
-                <th style={{ textAlign: "right" }}>{t("actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
+          <div className="file-card-grid">
               {shares.map((item) => {
                 const folder = isFolderShare(item);
-                return (
-                  <tr key={item.id}>
-                    <td style={{ fontWeight: 600 }}>
-                      {folder ? "📁 " : "📄 "}
-                      {item.file_name}
-                      {folder && (
-                        <span
-                          style={{
-                            marginLeft: 8,
-                            fontSize: "0.75rem",
-                            color: "#64748b",
-                          }}
-                        >
-                          {t("folder")}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      {item.owner_first_name} {item.owner_last_name}
-                      <div
-                        style={{
-                          fontSize: "0.8rem",
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        {item.owner_email}
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        className={`tag ${
-                          item.permission === "Read Only" ? "tag-gray" : "tag-amber"
-                        }`}
-                      >
-                        {permLabel(item.permission)}
-                      </span>
-                    </td>
-                    <td>{formatDate(item.created_at)}</td>
-                    <td>
-                      <div className="row-actions">
-                        {folder ? (
-                          <button
-                            type="button"
-                            className="btn btn-outline"
-                            style={{ fontSize: "0.8rem" }}
-                            onClick={() => openSharedFolder(item)}
-                          >
-                            {t("openFolder")}
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              className="icon-btn"
-                              title={t("download")}
-                              onClick={() =>
-                                handleDownload(item.file_key, item.file_name)
-                              }
-                            >
-                              <DownloadIcon />
-                            </button>
-                            {item.permission === "Read & Write" && (
-                              <button
-                                className="btn btn-outline"
-                                title={t("updateFile")}
-                                disabled={replacingId === item.id}
-                                onClick={() => startReplace(item)}
-                                style={{ marginLeft: 6, fontSize: "0.8rem" }}
-                              >
-                                {replacingId === item.id
-                                  ? t("updating")
-                                  : t("updateFile")}
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
+                const type = guessType(item.file_name);
+                return <FileCard key={item.id} item={{ key: item.file_key, name: item.file_name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => folder ? openSharedFolder(item) : setPreviewModal({ key: file.key, name: file.name })} meta={`${item.owner_first_name || ""} ${item.owner_last_name || ""}`.trim() || item.owner_email} actions={folder ? <button className="btn btn-outline" onClick={() => openSharedFolder(item)}>{t("openFolder")}</button> : <><button className="btn btn-outline" onClick={() => handleDownload(item.file_key, item.file_name)}>{t("download")}</button>{item.permission === "Read & Write" && <button className="btn btn-outline" disabled={replacingId === item.id} onClick={() => startReplace(item)}>{replacingId === item.id ? t("updating") : t("updateFile")}</button>}</>} />;
               })}
-            </tbody>
-          </table>
+          </div>
         )}
       </div>
+      {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
     </div>
   );
 }
@@ -420,4 +305,12 @@ function DownloadIcon() {
       <path d="M4 20h16" />
     </svg>
   );
+}
+
+function guessType(name) {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) return "image";
+  if (["mp4", "webm", "ogg", "mov"].includes(ext)) return "video";
+  if (ext === "pdf") return "pdf";
+  return "file";
 }
