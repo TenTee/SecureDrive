@@ -268,6 +268,17 @@ export default function MyFiles() {
     setPreviewModal({ key: file.key, name: file.name });
   }
 
+  async function copyFileLink(file) {
+    setMenu(null);
+    const link = `${window.location.origin}/file?key=${encodeURIComponent(file.key)}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast(t("linkCopied"));
+    } catch {
+      window.prompt(t("copyLink"), link);
+    }
+  }
+
   function requestDownload(file) {
     setMenu(null);
     setConfirm({
@@ -794,6 +805,9 @@ export default function MyFiles() {
               )}
               <button type="button" onClick={() => requestDownload(menu.item)}>
                 {t("download")}
+              </button>
+              <button type="button" onClick={() => copyFileLink(menu.item)}>
+                {t("copyLink")}
               </button>
               <button type="button" onClick={() => toggleFavorite(menu.item)}>
                 {favoriteKeys.has(menu.item.key) ? t("removeFavorite") : t("addFavorite")}

@@ -9,6 +9,7 @@ import {
   PutObjectCommand,
   ListObjectsV2Command,
   GetObjectCommand,
+  HeadObjectCommand,
   CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
@@ -328,6 +329,30 @@ router.get("/preview", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Preview error:", err.message);
     res.status(500).json({ error: "Could not create preview URL", details: err.message });
+  }
+});
+
+// GET /api/files/item?key=  (metadata for a protected deep link)
+router.get("/item", requireAuth, async (req, res) => {
+  try {
+    const fileKey = req.query.key;
+    if (!fileKey) return res.status(400).json({ error: "Missing key" });
+    if (!(await canAccessKey(fileKey, req.user))) {
+      return res.status(403).json({ error: "You don't have access to this file." });
+    }
+
+    const s3 = await getTemporaryS3Client(`user-${req.user.userId}`);
+    const response = await s3.send(
+      new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: fileKey })
+    );
+    res.json({
+      key: fileKey,
+      size: response.ContentLength,
+      lastModified: response.LastModified,
+    });
+  } catch (err) {
+    console.error("Get file metadata error:", err.message);
+    res.status(404).json({ error: "File not found or no longer available." });
   }
 });
 

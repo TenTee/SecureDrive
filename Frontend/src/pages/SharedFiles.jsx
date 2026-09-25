@@ -69,6 +69,16 @@ export default function SharedFiles() {
     }
   }
 
+  async function copyFileLink(fileKey) {
+    const link = `${window.location.origin}/file?key=${encodeURIComponent(fileKey)}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      alert(t("linkCopied"));
+    } catch {
+      window.prompt(t("copyLink"), link);
+    }
+  }
+
   function formatDate(dateStr) {
     if (!dateStr) return "—";
     return new Date(dateStr).toLocaleDateString("fr-FR");
@@ -102,7 +112,7 @@ export default function SharedFiles() {
               const name = item.file_name || "file";
               const folder = item.isFolder === true || item.file_key?.endsWith("/");
               const type = guessType(name);
-              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<button className="btn btn-outline" onClick={() => handleRemoveShare(item.id)}>{t("removeAccess")}</button>} />;
+              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<>{!folder && <button className="btn btn-outline" onClick={() => copyFileLink(item.file_key)}>{t("copyLink")}</button>}<button className="btn btn-outline" onClick={() => handleRemoveShare(item.id)}>{t("removeAccess")}</button></>} />;
             })}
           </div>
         )}

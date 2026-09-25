@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 
 import Login from "./pages/Login.jsx";
 import ChangePassword from "./pages/ChangePassword.jsx";
@@ -18,6 +18,16 @@ import ForgotPassword from "./pages/ForgotPassword.jsx";
 import ResetPassword from "./pages/ResetPassword.jsx";
 import "./App.css";
 
+function FileLinkEntry() {
+  const location = useLocation();
+  const key = new URLSearchParams(location.search).get("key");
+  const target = key ? `/admin/shared-with-me?file=${encodeURIComponent(key)}` : "/login";
+  const token = localStorage.getItem("token");
+
+  if (key && !token) localStorage.setItem("pendingFileLink", target);
+  return <Navigate to={token ? target : "/login"} replace />;
+}
+
 export default function App() {
   return (
     <div className="app-root">
@@ -27,6 +37,7 @@ export default function App() {
         <Route path="/change-password" element={<ChangePassword />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/file" element={<FileLinkEntry />} />
 
         <Route path="/admin" element={<AdminLayout />}>
           <Route path="dashboard" element={<AdminDashboard />} />

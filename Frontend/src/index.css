@@ -30,6 +30,9 @@ body {
 .file-card-menu:hover { background: #fff; color: #0f172a; }
 .file-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .file-card-actions .btn { padding: 5px 8px; font-size: 0.76rem; }
+.menu-floating { position: fixed; z-index: 10050; min-width: 200px; padding: 6px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18); text-align: left; }
+.menu-floating button { display: block; width: 100%; padding: 11px 14px; border: 0; border-radius: 8px; background: transparent; color: #0f172a; cursor: pointer; font-size: 0.9rem; text-align: left; }
+.menu-floating button:hover { background: #f1f5f9; }
 @media (max-width: 768px) { .file-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 10px; } .file-card-preview { height: 112px; } }
 
 a {

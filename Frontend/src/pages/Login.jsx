@@ -60,7 +60,9 @@ export default function Login() {
       if (data.user?.mustChangePassword || data.mustChangePassword) {
         navigate("/change-password");
       } else {
-        navigate("/admin/dashboard");
+        const pendingFileLink = localStorage.getItem("pendingFileLink");
+        localStorage.removeItem("pendingFileLink");
+        navigate(pendingFileLink || "/admin/dashboard");
       }
     } catch {
       setError("Cannot connect to server. Is the backend running?");
