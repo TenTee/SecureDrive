@@ -76,6 +76,7 @@ export default function MyFiles() {
   const [shareRecipientsError, setShareRecipientsError] = useState("");
   const [shareSearch, setShareSearch] = useState("");
   const [selectedShareUserIds, setSelectedShareUserIds] = useState([]);
+  const [recipientPermissions, setRecipientPermissions] = useState({});
   const [sharePermission, setSharePermission] = useState("Read Only");
   const [sharing, setSharing] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -452,7 +453,10 @@ export default function MyFiles() {
         setShareRecipientsError(data.error || "Could not load users");
         return;
       }
-      setShareRecipients(data.recipients || []);
+      const recipients = data.recipients || [];
+      setShareRecipients(recipients);
+      setSelectedShareUserIds(recipients.filter((recipient) => recipient.alreadyShared).map((recipient) => recipient.id));
+      setRecipientPermissions(Object.fromEntries(recipients.map((recipient) => [recipient.id, recipient.permission || sharePermission])));
     } catch {
       setShareRecipientsError("Cannot connect to server");
     } finally {
@@ -466,9 +470,13 @@ export default function MyFiles() {
       : [...current, userId]);
   }
 
+  function setRecipientPermission(userId, permission) {
+    setRecipientPermissions((current) => ({ ...current, [userId]: permission }));
+  }
+
   async function handleShare(e) {
     e.preventDefault();
-    if (!shareModal || selectedShareUserIds.length === 0) return;
+    if (!shareModal) return;
     setSharing(true);
     const token = localStorage.getItem("token");
 
@@ -477,6 +485,13 @@ export default function MyFiles() {
       shareModal.type === "folder";
     let fileKey = shareModal.key;
     if (isFolder && fileKey && !fileKey.endsWith("/")) fileKey = `${fileKey}/`;
+    const revokeUserIds = shareRecipients
+      .filter((recipient) => recipient.alreadyShared && !selectedShareUserIds.includes(recipient.id))
+      .map((recipient) => recipient.id);
+    if (selectedShareUserIds.length === 0 && revokeUserIds.length === 0) {
+      setSharing(false);
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/shares`, {
@@ -489,7 +504,8 @@ export default function MyFiles() {
           fileKey,
           fileName: shareModal.name,
           userIds: selectedShareUserIds,
-          permission: sharePermission,
+          revokeUserIds,
+          permissionByUserId: Object.fromEntries(selectedShareUserIds.map((id) => [id, recipientPermissions[id] || sharePermission])),
           isFolder: !!isFolder,
         }),
       });
@@ -499,7 +515,9 @@ export default function MyFiles() {
         return;
       }
       const sharedCount = data.shares?.length || 0;
-      showToast(`${t("shareComplete")}: ${sharedCount}`);
+      const updatedCount = data.updatedShares?.length || 0;
+      const revokedCount = data.revokedUserIds?.length || 0;
+      showToast(`${t("shareComplete")}: ${sharedCount} · ${t("permissionsUpdated")}: ${updatedCount} · ${t("accessRemoved")}: ${revokedCount}`);
       setShareModal(null);
     } catch {
       showToast("Cannot connect to server", "error");
@@ -938,19 +956,36 @@ export default function MyFiles() {
                   .map((recipient) => (
                     <label
                       key={recipient.id}
-                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid #f1f5f9", cursor: recipient.alreadyShared ? "not-allowed" : "pointer", opacity: recipient.alreadyShared ? 0.65 : 1 }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid #f1f5f9", cursor: "pointer", opacity: sharing ? 0.65 : 1 }}
                     >
                       <input
                         type="checkbox"
-                        checked={recipient.alreadyShared || selectedShareUserIds.includes(recipient.id)}
-                        disabled={recipient.alreadyShared || sharing}
+                        checked={selectedShareUserIds.includes(recipient.id)}
+                        disabled={sharing}
                         onChange={() => toggleShareRecipient(recipient.id)}
                       />
                       <span style={{ minWidth: 0, flex: 1 }}>
                         <span style={{ display: "block", fontWeight: 600 }}>{recipient.first_name} {recipient.last_name}</span>
                         <span style={{ display: "block", color: "#64748b", fontSize: "0.8rem" }}>{recipient.email}</span>
                       </span>
-                      {recipient.alreadyShared && <span className="tag tag-gray">{t("alreadyShared")}</span>}
+                      {recipient.alreadyShared && (
+                        <span className="tag tag-gray">
+                          {selectedShareUserIds.includes(recipient.id) ? t("alreadyShared") : t("accessWillBeRemoved")}
+                        </span>
+                      )}
+                      {selectedShareUserIds.includes(recipient.id) && (
+                        <select
+                          aria-label={`${t("permission")} ${recipient.email}`}
+                          value={recipientPermissions[recipient.id] || sharePermission}
+                          disabled={sharing}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => setRecipientPermission(recipient.id, event.target.value)}
+                          style={{ ...inputStyle, width: "auto", minWidth: 120, margin: 0, padding: "6px 8px" }}
+                        >
+                          <option value="Read Only">{t("readOnly")}</option>
+                          <option value="Read & Write">{t("readWrite")}</option>
+                        </select>
+                      )}
                     </label>
                   ))
               )}
@@ -958,19 +993,6 @@ export default function MyFiles() {
             <div style={{ marginTop: 6, fontSize: "0.8rem", color: "#64748b" }}>
               {t("selectedUsers")}: {selectedShareUserIds.length}
             </div>
-            <label
-              style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginTop: 12 }}
-            >
-              {t("permission")}
-            </label>
-            <select
-              value={sharePermission}
-              onChange={(e) => setSharePermission(e.target.value)}
-              style={{ ...inputStyle, marginTop: 6 }}
-            >
-              <option value="Read Only">{t("readOnly")}</option>
-              <option value="Read & Write">{t("readWrite")}</option>
-            </select>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
               <button type="button" className="btn btn-outline" onClick={() => setShareModal(null)}>
                 {t("cancel")}
@@ -978,9 +1000,9 @@ export default function MyFiles() {
               <button
                 type="submit"
                 className="btn btn-solid"
-                disabled={sharing || shareRecipientsLoading || shareRecipientsError !== "" || selectedShareUserIds.length === 0}
+                disabled={sharing || shareRecipientsLoading || shareRecipientsError !== "" || (selectedShareUserIds.length === 0 && !shareRecipients.some((recipient) => recipient.alreadyShared))}
               >
-                {sharing ? t("sharing") : `${t("share")} (${selectedShareUserIds.length})`}
+                {sharing ? t("sharing") : t("applySharingChanges")}
               </button>
             </div>
           </form>

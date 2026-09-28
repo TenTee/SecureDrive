@@ -52,7 +52,7 @@ router.get("/recipients", async (req, res) => {
 // POST /api/shares  (fichier OU dossier)
 router.post("/", async (req, res) => {
   try {
-    let { fileKey, fileName, email, emails, userIds, permission, isFolder } = req.body;
+    let { fileKey, fileName, email, emails, userIds, revokeUserIds, permissionByUserId, permission, isFolder } = req.body;
     const ownerId = req.user.userId;
 
     const recipientsInput = Array.isArray(userIds)
@@ -63,12 +63,15 @@ router.post("/", async (req, res) => {
           ? [email]
           : [];
 
-    if (!fileKey || !fileName || recipientsInput.length === 0 || !permission) {
+    const revokeIds = Array.isArray(revokeUserIds)
+      ? [...new Set(revokeUserIds.map(Number).filter(Number.isInteger))]
+      : [];
+    if (!fileKey || !fileName || (recipientsInput.length === 0 && revokeIds.length === 0)) {
       return res.status(400).json({
-        error: "fileKey, fileName, recipients and permission are required",
+        error: "fileKey, fileName and at least one sharing change are required",
       });
     }
-    if (!["Read Only", "Read & Write"].includes(permission)) {
+    if (!permissionByUserId && !["Read Only", "Read & Write"].includes(permission)) {
       return res.status(400).json({ error: "Invalid permission" });
     }
 
@@ -104,33 +107,59 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "One or more selected users are unavailable" });
     }
 
+    const permissionForUser = (userId) => permissionByUserId?.[userId] || permission;
+    if (userResult.rows.some((target) => !["Read Only", "Read & Write"].includes(permissionForUser(target.id)))) {
+      return res.status(400).json({ error: "Invalid permission for one or more selected users" });
+    }
+
+    const existingResult = await pool.query(
+      `SELECT shared_with_id FROM shares
+       WHERE owner_id = $1 AND file_key = $2 AND shared_with_id = ANY($3::int[])`,
+      [ownerId, fileKey, userResult.rows.map((target) => target.id)]
+    );
+    const existingIds = new Set(existingResult.rows.map((row) => row.shared_with_id));
+
+    let revoked = [];
+    if (revokeIds.length) {
+      const removeResult = await pool.query(
+        `DELETE FROM shares
+         WHERE owner_id = $1 AND file_key = $2 AND shared_with_id = ANY($3::int[])
+         RETURNING shared_with_id`,
+        [ownerId, fileKey, revokeIds]
+      );
+      revoked = removeResult.rows.map((row) => row.shared_with_id);
+    }
+
     const createdShares = [];
-    const alreadyShared = [];
+    const updatedShares = [];
     for (const target of userResult.rows) {
       const insert = await pool.query(
         `INSERT INTO shares (file_key, file_name, owner_id, shared_with_id, permission)
          VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (file_key, shared_with_id) DO NOTHING
+         ON CONFLICT (file_key, shared_with_id)
+         DO UPDATE SET permission = EXCLUDED.permission, file_name = EXCLUDED.file_name, created_at = now()
          RETURNING id, file_key, file_name, permission, created_at`,
-        [fileKey, fileName, ownerId, target.id, permission]
+        [fileKey, fileName, ownerId, target.id, permissionForUser(target.id)]
       );
-      if (insert.rows.length) createdShares.push({ ...insert.rows[0], recipient: target.email });
-      else alreadyShared.push(target.email);
+      const saved = { ...insert.rows[0], recipient: target.email };
+      if (existingIds.has(target.id)) updatedShares.push(saved);
+      else createdShares.push(saved);
     }
 
-    if (createdShares.length) {
+    if (createdShares.length || updatedShares.length || revoked.length) {
       await logActivity({
         userId: req.user.userId,
         userName: req.user.email || `User #${req.user.userId}`,
         action: isFolder ? "Shared a folder" : "Shared a file",
-        detail: `${fileName} → ${createdShares.map((share) => share.recipient).join(", ")} (${permission})`,
+        detail: `${fileName}: ${createdShares.length} added, ${updatedShares.length} updated, ${revoked.length} removed`,
       });
     }
 
     res.status(201).json({
       message: isFolder ? "Folder sharing processed" : "File sharing processed",
       shares: createdShares,
-      alreadyShared,
+      updatedShares,
+      revokedUserIds: revoked,
       isFolder: !!isFolder,
       sharedWith: userResult.rows.map((target) => ({
         id: target.id,
