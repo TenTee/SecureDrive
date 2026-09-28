@@ -6,6 +6,25 @@ import { s3Client, BUCKET_NAME } from "../config/s3Client.js";
 
 const router = Router();
 
+async function listAllObjects(prefix) {
+  const objects = [];
+  let continuationToken;
+
+  do {
+    const response = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+    objects.push(...(response.Contents || []));
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return objects;
+}
+
 router.use(requireAuth);
 
 // GET /api/dashboard
@@ -35,21 +54,16 @@ router.get("/", async (req, res) => {
       activeAccounts = activeCount.rows[0].total;
     }
 
-    // --- Fichiers S3 ---
-    // Super Admin / Manager → tout uploads/
-    // User → seulement uploads/{sonId}/
-    const prefix = canSeeAllFiles ? "uploads/" : `uploads/${userId}/`;
-
-    const listRes = await s3Client.send(
-      new ListObjectsV2Command({
-        Bucket: BUCKET_NAME,
-        Prefix: prefix,
-        MaxKeys: 200,
-      })
-    );
-
-    const files = (listRes.Contents || [])
-      .filter((item) => item.Key && !item.Key.endsWith("/"))
+    // Storage totals include both active files and objects in trash.
+    const userPrefix = canSeeAllFiles ? "" : `${userId}/`;
+    const storagePrefixes = canSeeAllFiles
+      ? ["uploads/", "trash/"]
+      : [`uploads/${userPrefix}`, `trash/${userPrefix}`];
+    const storageObjects = (await Promise.all(storagePrefixes.map(listAllObjects))).flat();
+    const uploadPrefix = canSeeAllFiles ? "uploads/" : `uploads/${userId}/`;
+    const files = storageObjects
+      .filter((item) => item.Key?.startsWith(uploadPrefix) && !item.Key.endsWith("/"))
+      .filter((item) => !item.Key.endsWith(".keep"))
       .map((item) => ({
         key: item.Key,
         size: item.Size || 0,
@@ -57,7 +71,7 @@ router.get("/", async (req, res) => {
       }));
 
     const filesCount = files.length;
-    const storageBytes = files.reduce((sum, f) => sum + f.size, 0);
+    const storageBytes = storageObjects.reduce((sum, item) => sum + (item.Size || 0), 0);
 
     // --- Partagés avec moi ---
     const sharedRes = await pool.query(

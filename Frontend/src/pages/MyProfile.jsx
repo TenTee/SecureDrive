@@ -24,6 +24,13 @@ const TAB_KEYS = [
   { id: "Privacy", labelKey: "tabPrivacy" },
 ];
 
+function formatBytes(bytes = 0) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
 export default function MyProfile() {
   const { user } = useOutletContext();
   const navigate = useNavigate();
@@ -36,7 +43,7 @@ export default function MyProfile() {
     return () => window.removeEventListener("sd-lang-change", onLang);
   }, []);
 
-  const storagePct = Math.round((user.storageUsedGB / user.storageTotalGB) * 100);
+  const storageBytes = user.storageUsedBytes ?? (user.storageUsedGB || 0) * (1024 ** 3);
 
   function handleSignOut() {
     localStorage.removeItem("token");
@@ -90,32 +97,13 @@ export default function MyProfile() {
         <div className="panel">
           <div className="panel-header">
             <span className="panel-title">{t("storageUsage")}</span>
-            <span className="tag tag-blue">{storagePct}%</span>
+            <span className="tag tag-blue">S3</span>
           </div>
-          <div className="sidebar-storage-track" style={{ height: 6 }}>
-            <div
-              className="sidebar-storage-fill"
-              style={{ width: `${storagePct}%` }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginTop: 8,
-              fontSize: "0.8rem",
-              color: "var(--text-secondary)",
-            }}
-          >
-            <span>
-              {user.storageUsedGB} {t("gbUsed")}
-            </span>
-            <span>
-              {(user.storageTotalGB - user.storageUsedGB).toFixed(1)} {t("gbFree")}
-            </span>
-            <span>
-              {user.storageTotalGB} {t("gbTotal")}
-            </span>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: "1.6rem", fontWeight: 700 }}>{formatBytes(storageBytes)}</div>
+            <div style={{ marginTop: 4, color: "var(--text-secondary)", fontSize: "0.8rem" }}>
+              {t("s3StorageCaption")}
+            </div>
           </div>
         </div>
         <div className="panel">

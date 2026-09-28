@@ -97,7 +97,8 @@ function buildDisplayUser(rawUser) {
     department: rawUser.department || "—",
     status: "Active",
     storageUsedGB: 0,
-    storageTotalGB: 25,
+    storageUsedBytes: 0,
+    storageTotalGB: 0,
     filesOwned: 0,
     sharedByMeCount: 0,
     lastLogin: "Just now",
@@ -257,6 +258,29 @@ export default function AdminLayout() {
     }
 
     loadFiles();
+  }, []);
+
+  useEffect(() => {
+    async function loadStorageStats() {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch(`${API_BASE}/api/dashboard`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const data = await res.json();
+        if (!res.ok || !data.stats) return;
+        setUser((current) => current ? {
+          ...current,
+          storageUsedBytes: data.stats.storageBytes || 0,
+          storageUsedGB: (data.stats.storageBytes || 0) / (1024 ** 3),
+          filesOwned: data.stats.filesCount || 0,
+        } : current);
+      } catch (err) {
+        console.error("Could not load real S3 storage stats:", err);
+      }
+    }
+
+    loadStorageStats();
   }, []);
 
   useEffect(() => {

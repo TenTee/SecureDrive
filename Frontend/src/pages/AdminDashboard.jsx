@@ -146,7 +146,7 @@ export default function AdminDashboard() {
             </div>
             <div style={{ padding: "8px 0" }}>
               <div style={{ fontSize: "1.4rem", fontWeight: 700 }}>{formatBytes(stats.storageBytes)}</div>
-              <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>{t("of25gb")}</div>
+              <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem" }}>{t("s3StorageCaption")}</div>
             </div>
             <button className="btn btn-solid" style={{ marginTop: 16 }} onClick={() => navigate("/admin/files")}>
               {t("goToMyFiles")}
