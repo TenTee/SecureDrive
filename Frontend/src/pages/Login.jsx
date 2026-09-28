@@ -75,65 +75,21 @@ export default function Login() {
 
   return (
     <div className="login-screen">
-      <div className="login-panel-left">
-        <div className="login-brand">
-          <div className="login-brand-icon">
-            <ShieldIcon />
-          </div>
-          <div>
-            <div className="login-brand-name">
-              Secure<span>Drive</span>
-            </div>
-            <div className="login-brand-tagline">{t("enterpriseTagline")}</div>
+      <main className="login-card">
+        <div className="login-card-topbar">
+          <div className="login-language-switch" aria-label="Language">
+            <button type="button" onClick={() => setLang("en")} style={langBtnStyle(lang === "en")}>EN</button>
+            <button type="button" onClick={() => setLang("fr")} style={langBtnStyle(lang === "fr")}>FR</button>
           </div>
         </div>
 
-        <div className="login-badges">
-          <span className="login-badge">ENCRYPTION</span>
-          <span className="login-badge">RBAC</span>
-          <span className="login-badge">AUDIT</span>
+        <div className="login-brand login-brand-centered">
+          <div className="login-brand-icon"><ShieldIcon /></div>
+          <div className="login-brand-name">Secure<span>Drive</span></div>
         </div>
 
-        <h1 className="login-headline">{t("loginHeadline")}</h1>
-        <p className="login-description">{t("loginDescription")}</p>
-
-        <div className="login-stats">
-          <div>
-            <div className="login-stat-value">2.4M+</div>
-            <div className="login-stat-label">{t("filesProtected")}</div>
-          </div>
-          <div>
-            <div className="login-stat-value">340</div>
-            <div className="login-stat-label">{t("activeUsersLabel")}</div>
-          </div>
-          <div>
-            <div className="login-stat-value">99.9%</div>
-            <div className="login-stat-label">{t("uptimeSla")}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="login-panel-right" style={{ position: "relative" }}>
-        <div
-          style={{
-            position: "absolute",
-            top: 20,
-            right: 24,
-            display: "flex",
-            gap: 4,
-            zIndex: 2,
-          }}
-        >
-          <button type="button" onClick={() => setLang("en")} style={langBtnStyle(lang === "en")}>
-            EN
-          </button>
-          <button type="button" onClick={() => setLang("fr")} style={langBtnStyle(lang === "fr")}>
-            FR
-          </button>
-        </div>
-
-        <form className="login-form" onSubmit={handleSubmit} style={{ paddingTop: 12 }}>
-          <h2 className="login-form-title">{t("welcomeBack")}</h2>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <h1 className="login-form-title">{t("welcomeBack")}</h1>
           <p className="login-form-subtitle">{t("signInSubtitle")}</p>
 
           <label className="login-label">{t("corporateEmail")}</label>
@@ -186,25 +142,13 @@ export default function Login() {
             </button>
           </div>
 
-          {error && (
-            <div style={{ color: "#ef4444", marginBottom: "12px", fontSize: "14px" }}>
-              {error}
-            </div>
-          )}
+          {error && <div className="login-error" role="alert">{error}</div>}
 
           <button type="submit" className="login-submit-btn" disabled={loading}>
             {loading ? t("signingIn") : t("signIn")}
           </button>
-
-          <div className="login-security-note">
-            <LockIcon small /> {t("securedNote")}
-          </div>
-
-          <p className="login-footer-note">
-            {t("noAccount")} <a href="#contact">{t("itAdmin")}</a>
-          </p>
         </form>
-      </div>
+      </main>
     </div>
   );
 }
