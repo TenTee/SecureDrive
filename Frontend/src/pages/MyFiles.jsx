@@ -71,7 +71,11 @@ export default function MyFiles() {
   const [confirm, setConfirm] = useState(null);
   const [moveModal, setMoveModal] = useState(null);
   const [shareModal, setShareModal] = useState(null);
-  const [shareEmail, setShareEmail] = useState("");
+  const [shareRecipients, setShareRecipients] = useState([]);
+  const [shareRecipientsLoading, setShareRecipientsLoading] = useState(false);
+  const [shareRecipientsError, setShareRecipientsError] = useState("");
+  const [shareSearch, setShareSearch] = useState("");
+  const [selectedShareUserIds, setSelectedShareUserIds] = useState([]);
   const [sharePermission, setSharePermission] = useState("Read Only");
   const [sharing, setSharing] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -424,20 +428,55 @@ export default function MyFiles() {
     }
   }
 
+  async function openShareModal(item) {
+    setShareModal(item);
+    setShareRecipients([]);
+    setSelectedShareUserIds([]);
+    setShareSearch("");
+    setShareRecipientsError("");
+    setShareRecipientsLoading(true);
+    const isFolder =
+      (typeof item.key === "string" && item.key.endsWith("/")) || item.type === "folder";
+    let fileKey = item.key;
+    if (isFolder && fileKey && !fileKey.endsWith("/")) {
+      fileKey = `${fileKey}/`;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/shares/recipients?fileKey=${encodeURIComponent(fileKey)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setShareRecipientsError(data.error || "Could not load users");
+        return;
+      }
+      setShareRecipients(data.recipients || []);
+    } catch {
+      setShareRecipientsError("Cannot connect to server");
+    } finally {
+      setShareRecipientsLoading(false);
+    }
+  }
+
+  function toggleShareRecipient(userId) {
+    setSelectedShareUserIds((current) => current.includes(userId)
+      ? current.filter((id) => id !== userId)
+      : [...current, userId]);
+  }
+
   async function handleShare(e) {
     e.preventDefault();
-    if (!shareModal || !shareEmail.trim()) return;
+    if (!shareModal || selectedShareUserIds.length === 0) return;
     setSharing(true);
     const token = localStorage.getItem("token");
 
     const isFolder =
       (typeof shareModal.key === "string" && shareModal.key.endsWith("/")) ||
       shareModal.type === "folder";
-
     let fileKey = shareModal.key;
-    if (isFolder && fileKey && !fileKey.endsWith("/")) {
-      fileKey = `${fileKey}/`;
-    }
+    if (isFolder && fileKey && !fileKey.endsWith("/")) fileKey = `${fileKey}/`;
 
     try {
       const res = await fetch(`${API_BASE}/api/shares`, {
@@ -449,7 +488,7 @@ export default function MyFiles() {
         body: JSON.stringify({
           fileKey,
           fileName: shareModal.name,
-          email: shareEmail.trim(),
+          userIds: selectedShareUserIds,
           permission: sharePermission,
           isFolder: !!isFolder,
         }),
@@ -459,7 +498,8 @@ export default function MyFiles() {
         showToast(data.error || "Share failed", "error");
         return;
       }
-      showToast(`"${shareModal.name}" → ${shareEmail.trim()}`);
+      const sharedCount = data.shares?.length || 0;
+      showToast(`${t("shareComplete")}: ${sharedCount}`);
       setShareModal(null);
     } catch {
       showToast("Cannot connect to server", "error");
@@ -779,8 +819,7 @@ export default function MyFiles() {
                 type="button"
                 onClick={() => {
                   setMenu(null);
-                  setShareEmail("");
-                  setShareModal(menu.item);
+                  openShareModal(menu.item);
                 }}
               >
                 {t("shareEllipsis")}
@@ -816,8 +855,7 @@ export default function MyFiles() {
                 type="button"
                 onClick={() => {
                   setMenu(null);
-                  setShareEmail("");
-                  setShareModal(menu.item);
+                  openShareModal(menu.item);
                 }}
               >
                 {t("shareEllipsis")}
@@ -878,16 +916,48 @@ export default function MyFiles() {
             <b>{shareModal.name}</b>
           </p>
           <form onSubmit={handleShare}>
-            <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>{t("email")}</label>
+            <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>{t("selectUsers")}</label>
             <input
-              type="email"
-              value={shareEmail}
-              onChange={(e) => setShareEmail(e.target.value)}
-              placeholder="colleague@tentee.com"
+              type="search"
+              value={shareSearch}
+              onChange={(e) => setShareSearch(e.target.value)}
+              placeholder={t("searchUsers")}
               style={inputStyle}
-              required
               autoFocus
             />
+            <div style={{ marginTop: 8, maxHeight: 240, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+              {shareRecipientsLoading ? (
+                <div style={{ padding: 16, color: "#64748b", textAlign: "center" }}>{t("loading")}</div>
+              ) : shareRecipientsError ? (
+                <div style={{ padding: 12, color: "#dc2626" }}>{shareRecipientsError}</div>
+              ) : shareRecipients.filter((recipient) => `${recipient.first_name} ${recipient.last_name} ${recipient.email}`.toLowerCase().includes(shareSearch.trim().toLowerCase())).length === 0 ? (
+                <div style={{ padding: 16, color: "#64748b", textAlign: "center" }}>{t("noUsersToShare")}</div>
+              ) : (
+                shareRecipients
+                  .filter((recipient) => `${recipient.first_name} ${recipient.last_name} ${recipient.email}`.toLowerCase().includes(shareSearch.trim().toLowerCase()))
+                  .map((recipient) => (
+                    <label
+                      key={recipient.id}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid #f1f5f9", cursor: recipient.alreadyShared ? "not-allowed" : "pointer", opacity: recipient.alreadyShared ? 0.65 : 1 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={recipient.alreadyShared || selectedShareUserIds.includes(recipient.id)}
+                        disabled={recipient.alreadyShared || sharing}
+                        onChange={() => toggleShareRecipient(recipient.id)}
+                      />
+                      <span style={{ minWidth: 0, flex: 1 }}>
+                        <span style={{ display: "block", fontWeight: 600 }}>{recipient.first_name} {recipient.last_name}</span>
+                        <span style={{ display: "block", color: "#64748b", fontSize: "0.8rem" }}>{recipient.email}</span>
+                      </span>
+                      {recipient.alreadyShared && <span className="tag tag-gray">{t("alreadyShared")}</span>}
+                    </label>
+                  ))
+              )}
+            </div>
+            <div style={{ marginTop: 6, fontSize: "0.8rem", color: "#64748b" }}>
+              {t("selectedUsers")}: {selectedShareUserIds.length}
+            </div>
             <label
               style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginTop: 12 }}
             >
@@ -908,9 +978,9 @@ export default function MyFiles() {
               <button
                 type="submit"
                 className="btn btn-solid"
-                disabled={sharing || !shareEmail.trim()}
+                disabled={sharing || shareRecipientsLoading || shareRecipientsError !== "" || selectedShareUserIds.length === 0}
               >
-                {sharing ? t("sharing") : t("share")}
+                {sharing ? t("sharing") : `${t("share")} (${selectedShareUserIds.length})`}
               </button>
             </div>
           </form>

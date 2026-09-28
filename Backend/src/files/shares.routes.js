@@ -7,15 +7,65 @@ import { asFolderKey } from "./access.js";
 const router = Router();
 router.use(requireAuth);
 
+// GET /api/shares/recipients?fileKey=...  (active users + existing access)
+router.get("/recipients", async (req, res) => {
+  try {
+    const fileKey = req.query.fileKey;
+    if (!fileKey) return res.status(400).json({ error: "Missing fileKey" });
+
+    const isFolder = fileKey.endsWith("/");
+    const normalizedKey = isFolder ? asFolderKey(fileKey) : fileKey;
+    const ownsKey = normalizedKey.startsWith(`uploads/${req.user.userId}/`);
+    if (!ownsKey && req.user.role !== "Super Admin") {
+      return res.status(403).json({ error: "You can only share your own files or folders" });
+    }
+
+    const result = await pool.query(
+      `SELECT u.id, u.first_name, u.last_name, u.email,
+              s.permission AS existing_permission
+       FROM users u
+       LEFT JOIN shares s
+         ON s.shared_with_id = u.id
+        AND s.owner_id = $1
+        AND s.file_key = $2
+       WHERE u.status = 'Active' AND u.id <> $1
+       ORDER BY u.first_name, u.last_name, u.email`,
+      [req.user.userId, normalizedKey]
+    );
+
+    res.json({
+      recipients: result.rows.map((row) => ({
+        id: row.id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        email: row.email,
+        alreadyShared: row.existing_permission !== null,
+        permission: row.existing_permission,
+      })),
+    });
+  } catch (err) {
+    console.error("Share recipients error:", err.message);
+    res.status(500).json({ error: "Could not load share recipients" });
+  }
+});
+
 // POST /api/shares  (fichier OU dossier)
 router.post("/", async (req, res) => {
   try {
-    let { fileKey, fileName, email, permission, isFolder } = req.body;
+    let { fileKey, fileName, email, emails, userIds, permission, isFolder } = req.body;
     const ownerId = req.user.userId;
 
-    if (!fileKey || !fileName || !email || !permission) {
+    const recipientsInput = Array.isArray(userIds)
+      ? userIds
+      : Array.isArray(emails)
+        ? emails
+        : email
+          ? [email]
+          : [];
+
+    if (!fileKey || !fileName || recipientsInput.length === 0 || !permission) {
       return res.status(400).json({
-        error: "fileKey, fileName, email and permission are required",
+        error: "fileKey, fileName, recipients and permission are required",
       });
     }
     if (!["Read Only", "Read & Write"].includes(permission)) {
@@ -36,47 +86,57 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const userResult = await pool.query(
-      "SELECT id, email, first_name, last_name, status FROM users WHERE email = $1",
-      [email]
-    );
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: "User not found with this email" });
+    const byIds = Array.isArray(userIds);
+    const uniqueRecipients = [...new Set(recipientsInput.map((value) => byIds ? Number(value) : String(value).trim().toLowerCase()))];
+    const userResult = byIds
+      ? await pool.query(
+          `SELECT id, email, first_name, last_name FROM users
+           WHERE id = ANY($1::int[]) AND status = 'Active' AND id <> $2`,
+          [uniqueRecipients, ownerId]
+        )
+      : await pool.query(
+          `SELECT id, email, first_name, last_name FROM users
+           WHERE lower(email) = ANY($1::text[]) AND status = 'Active' AND id <> $2`,
+          [uniqueRecipients, ownerId]
+        );
+
+    if (userResult.rows.length !== uniqueRecipients.length) {
+      return res.status(400).json({ error: "One or more selected users are unavailable" });
     }
 
-    const target = userResult.rows[0];
-    if (target.status === "Disabled") {
-      return res.status(400).json({ error: "This account is disabled" });
-    }
-    if (target.id === ownerId) {
-      return res.status(400).json({ error: "You cannot share with yourself" });
+    const createdShares = [];
+    const alreadyShared = [];
+    for (const target of userResult.rows) {
+      const insert = await pool.query(
+        `INSERT INTO shares (file_key, file_name, owner_id, shared_with_id, permission)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (file_key, shared_with_id) DO NOTHING
+         RETURNING id, file_key, file_name, permission, created_at`,
+        [fileKey, fileName, ownerId, target.id, permission]
+      );
+      if (insert.rows.length) createdShares.push({ ...insert.rows[0], recipient: target.email });
+      else alreadyShared.push(target.email);
     }
 
-    const insert = await pool.query(
-      `INSERT INTO shares (file_key, file_name, owner_id, shared_with_id, permission)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (file_key, shared_with_id)
-       DO UPDATE SET permission = EXCLUDED.permission, created_at = now()
-       RETURNING id, file_key, file_name, permission, created_at`,
-      [fileKey, fileName, ownerId, target.id, permission]
-    );
-
-    await logActivity({
-      userId: req.user.userId,
-      userName: req.user.email || `User #${req.user.userId}`,
-      action: isFolder ? "Shared a folder" : "Shared a file",
-      detail: `${fileName} → ${email} (${permission})`,
-    });
+    if (createdShares.length) {
+      await logActivity({
+        userId: req.user.userId,
+        userName: req.user.email || `User #${req.user.userId}`,
+        action: isFolder ? "Shared a folder" : "Shared a file",
+        detail: `${fileName} → ${createdShares.map((share) => share.recipient).join(", ")} (${permission})`,
+      });
+    }
 
     res.status(201).json({
-      message: isFolder ? "Folder shared successfully" : "File shared successfully",
-      share: insert.rows[0],
+      message: isFolder ? "Folder sharing processed" : "File sharing processed",
+      shares: createdShares,
+      alreadyShared,
       isFolder: !!isFolder,
-      sharedWith: {
+      sharedWith: userResult.rows.map((target) => ({
         id: target.id,
         email: target.email,
         name: `${target.first_name} ${target.last_name}`,
-      },
+      })),
     });
   } catch (err) {
     console.error("Share error:", err.message);
