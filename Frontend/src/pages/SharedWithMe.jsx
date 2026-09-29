@@ -44,8 +44,10 @@ export default function SharedWithMe() {
   const [folderFolders, setFolderFolders] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browsePerm, setBrowsePerm] = useState("Read Only");
+  const [uploadTransfer, setUploadTransfer] = useState(null);
   const [menu, setMenu] = useState(null);
   const menuPanelRef = useRef(null);
+  const uploadRequestRef = useRef(null);
 
   useEffect(() => {
     const onLang = () => setTick((x) => x + 1);
@@ -80,6 +82,8 @@ export default function SharedWithMe() {
       window.removeEventListener("resize", closeOnViewportChange);
     };
   }, []);
+
+  useEffect(() => () => uploadRequestRef.current?.abort(), []);
 
   async function loadShares() {
     setLoading(true);
@@ -194,25 +198,52 @@ export default function SharedWithMe() {
     event.target.value = "";
     if (!file || !browsePath) return;
 
+    uploadRequestRef.current?.abort();
     const formData = new FormData();
     formData.append("file", file);
     formData.append("path", browsePath);
-    try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(`${API_BASE}/api/files/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data.error || "Could not upload file");
+    const token = localStorage.getItem("token");
+    const request = new XMLHttpRequest();
+    uploadRequestRef.current = request;
+    setUploadTransfer({ name: file.name, loaded: 0, total: file.size || 0, progress: 0 });
+    request.open("POST", `${API_BASE}/api/files/upload`);
+    request.setRequestHeader("Authorization", `Bearer ${token}`);
+    request.responseType = "json";
+    request.upload.onprogress = (progressEvent) => {
+      const total = progressEvent.lengthComputable ? progressEvent.total : file.size || 0;
+      setUploadTransfer((current) => current ? {
+        ...current,
+        loaded: progressEvent.loaded,
+        total,
+        progress: total ? Math.round((progressEvent.loaded / total) * 100) : 0,
+      } : current);
+    };
+    request.onload = async () => {
+      uploadRequestRef.current = null;
+      const data = request.response || {};
+      if (request.status < 200 || request.status >= 300) {
+        setUploadTransfer({ error: data.error || "Could not upload file" });
         return;
       }
       await openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm });
-    } catch {
-      alert("Cannot connect to server");
-    }
+      setUploadTransfer((current) => current ? { ...current, progress: 100, complete: true } : current);
+      window.setTimeout(() => setUploadTransfer(null), 900);
+    };
+    request.onerror = () => {
+      uploadRequestRef.current = null;
+      setUploadTransfer({ error: "Cannot connect to server" });
+    };
+    request.onabort = () => {
+      uploadRequestRef.current = null;
+      setUploadTransfer(null);
+    };
+    request.send(formData);
+  }
+
+  function cancelUpload() {
+    uploadRequestRef.current?.abort();
+    uploadRequestRef.current = null;
+    setUploadTransfer(null);
   }
 
   function backToShares() {
@@ -418,6 +449,7 @@ export default function SharedWithMe() {
         <input ref={fileInputRef} type="file" hidden onChange={onFileChosen} />
         {renderMenu()}
         {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+        {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
         {folderModal && (
           <div className="modal-overlay" onClick={() => !creatingFolder && setFolderModal(false)}>
             <form className="modal-card" onClick={(event) => event.stopPropagation()} onSubmit={createSharedFolder}>
@@ -487,6 +519,31 @@ export default function SharedWithMe() {
       </div>
       {renderMenu()}
       {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+    </div>
+  );
+}
+
+function UploadProgress({ transfer, onCancel }) {
+  if (transfer.error) {
+    return (
+      <div className="upload-progress-panel upload-progress-error" role="alert">
+        <strong>{transfer.error}</strong>
+        <button type="button" onClick={onCancel}>Fermer</button>
+      </div>
+    );
+  }
+
+  const hasTotal = Boolean(transfer.total);
+  return (
+    <div className="upload-progress-panel" role="status" aria-live="polite">
+      <div className="upload-progress-head">
+        <span className="upload-progress-name" title={transfer.name}>{transfer.name}</span>
+        <span className="upload-progress-value">{transfer.complete ? "100%" : hasTotal ? `${transfer.progress}%` : "Envoi..."}</span>
+      </div>
+      <div className="upload-progress-track" aria-hidden="true">
+        <div className={`upload-progress-bar${hasTotal ? "" : " indeterminate"}`} style={hasTotal ? { width: `${transfer.progress}%` } : undefined} />
+      </div>
+      {!transfer.complete && <button className="upload-cancel" type="button" onClick={onCancel}>Annuler le transfert</button>}
     </div>
   );
 }
