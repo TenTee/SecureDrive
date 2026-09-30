@@ -48,6 +48,7 @@ export default function SharedWithMe() {
   const [menu, setMenu] = useState(null);
   const menuPanelRef = useRef(null);
   const uploadRequestRef = useRef(null);
+  const browseRequestRef = useRef(0);
 
   useEffect(() => {
     const onLang = () => setTick((x) => x + 1);
@@ -129,6 +130,7 @@ export default function SharedWithMe() {
 
   async function openSharedFolder(item) {
     const path = item.file_key.endsWith("/") ? item.file_key : item.file_key + "/";
+    const requestId = ++browseRequestRef.current;
     setBrowsePath(path);
     setBrowseName(item.file_name || cleanName(path));
     setBrowsePerm(item.permission || "Read Only");
@@ -141,6 +143,7 @@ export default function SharedWithMe() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
+      if (requestId !== browseRequestRef.current) return;
       if (!res.ok) {
         setError(data.error || "Could not open folder");
         setBrowsePath(null);
@@ -157,10 +160,11 @@ export default function SharedWithMe() {
         }))
       );
     } catch {
+      if (requestId !== browseRequestRef.current) return;
       setError("Cannot connect to server");
       setBrowsePath(null);
     } finally {
-      setBrowseLoading(false);
+      if (requestId === browseRequestRef.current) setBrowseLoading(false);
     }
   }
 
@@ -248,10 +252,7 @@ export default function SharedWithMe() {
   }
 
   function backToShares() {
-    setBrowsePath(null);
-    setBrowseName("");
-    setFolderFiles([]);
-    setFolderFolders([]);
+    window.location.replace(`${window.location.origin}/admin/shared-with-me`);
   }
 
   async function handleDownload(fileKey, fileName) {
