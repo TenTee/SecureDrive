@@ -4,7 +4,7 @@ import multer from "multer";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { pool } from "../db/pool.js";
 import { logActivity } from "../activity/activity.routes.js";
-import { canAccessKey } from "./access.js";
+import { canAccessKey, getKeyPermission, resolveKeyPermission } from "./access.js";
 import {
   PutObjectCommand,
   ListObjectsV2Command,
@@ -53,6 +53,17 @@ async function deleteKeys(s3, keys) {
         Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
       })
     );
+  }
+}
+
+async function removeSharesForDeletedKey(key, isFolder) {
+  if (isFolder) {
+    await pool.query(
+      `DELETE FROM shares WHERE LEFT(file_key, LENGTH($1)) = $1`,
+      [key]
+    );
+  } else {
+    await pool.query(`DELETE FROM shares WHERE file_key = $1`, [key]);
   }
 }
 
@@ -108,11 +119,19 @@ router.get("/", requireAuth, async (req, res) => {
         type: "file",
       }));
 
+    const shareRows = !isSuperAdmin && !prefix.startsWith(`uploads/${userId}/`)
+      ? (await pool.query(
+          `SELECT permission, file_key FROM shares WHERE shared_with_id = $1`,
+          [userId]
+        )).rows
+      : [];
+    const permissionFor = (key) => resolveKeyPermission(key, req.user, shareRows);
+
     res.json({
       bucket: BUCKET_NAME,
       path: prefix,
-      folders,
-      files,
+      folders: folders.map((folder) => ({ ...folder, permission: permissionFor(folder.key) || "Read Only" })),
+      files: files.map((file) => ({ ...file, permission: permissionFor(file.key) || "Read Only" })),
       count: folders.length + files.length,
     });
   } catch (err) {
@@ -337,7 +356,8 @@ router.get("/item", requireAuth, async (req, res) => {
   try {
     const fileKey = req.query.key;
     if (!fileKey) return res.status(400).json({ error: "Missing key" });
-    if (!(await canAccessKey(fileKey, req.user))) {
+    const permission = await getKeyPermission(fileKey, req.user);
+    if (!permission) {
       return res.status(403).json({ error: "You don't have access to this file." });
     }
 
@@ -349,6 +369,7 @@ router.get("/item", requireAuth, async (req, res) => {
       key: fileKey,
       size: response.ContentLength,
       lastModified: response.LastModified,
+      permission,
     });
   } catch (err) {
     console.error("Get file metadata error:", err.message);
@@ -457,6 +478,8 @@ router.post("/trash", requireAuth, async (req, res) => {
       await deleteKeys(s3, sourceKeys);
     }
 
+    await removeSharesForDeletedKey(key, isFolder);
+
     await logActivity({
       userId: req.user.userId,
       userName: req.user.email || `User #${req.user.userId}`,
@@ -549,6 +572,7 @@ router.delete("/", requireAuth, async (req, res) => {
 
     const keys = key.endsWith("/") ? await listAllKeys(s3, key) : [key];
     await deleteKeys(s3, keys);
+    await removeSharesForDeletedKey(key, key.endsWith("/"));
 
     await logActivity({
       userId: req.user.userId,

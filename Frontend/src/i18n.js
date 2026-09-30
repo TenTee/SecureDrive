@@ -56,6 +56,8 @@ const translations = {
     moveToFolder: "Move to folder…",
     moveToTrash: "Move to trash",
     deleteFolder: "Delete folder",
+    deleteSharedFileConfirm: "Move this shared file to its owner's trash",
+    deleteSharedFolderConfirm: "Permanently delete this shared folder and its contents",
 
     sharedWithMeTitle: "Shared With Me",
     sharedWithMeSub: "Files and folders that other team members shared with you.",
@@ -372,6 +374,8 @@ continueToLogin: "Continue to Login →",
     moveToFolder: "Déplacer vers un dossier…",
     moveToTrash: "Mettre à la corbeille",
     deleteFolder: "Supprimer le dossier",
+    deleteSharedFileConfirm: "Déplacer ce fichier partagé dans la corbeille de son propriétaire",
+    deleteSharedFolderConfirm: "Supprimer définitivement ce dossier partagé et son contenu",
 
     sharedWithMeTitle: "Partagés avec moi",
     sharedWithMeSub: "Fichiers et dossiers partagés avec vous.",

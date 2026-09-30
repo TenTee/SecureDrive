@@ -119,7 +119,7 @@ export default function SharedWithMe() {
       }
       const name = cleanName(fileKey);
       const type = guessType(name);
-      const file = { key: fileKey, name, type, size: data.size };
+      const file = { key: fileKey, name, type, size: data.size, permission: data.permission };
       setDirectFile(file);
       if (type !== "file") setPreviewModal({ key: fileKey, name });
     } catch {
@@ -153,6 +153,7 @@ export default function SharedWithMe() {
           name: cleanName(f.key),
           size: f.size,
           type: guessType(cleanName(f.key)),
+          permission: f.permission || browsePerm,
         }))
       );
     } catch {
@@ -289,6 +290,49 @@ export default function SharedWithMe() {
     }
   }
 
+  async function deleteSharedItem(item, isFolder) {
+    setMenu(null);
+    const prompt = isFolder
+      ? `${t("deleteSharedFolderConfirm")} "${item.name}"?`
+      : `${t("deleteSharedFileConfirm")} "${item.name}"?`;
+    if (!window.confirm(prompt)) return;
+
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/trash`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ key: item.key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not delete shared item");
+        return;
+      }
+
+      setPreviewModal((current) => {
+        const isDeleted = current && (current.key === item.key || (isFolder && current.key.startsWith(item.key)));
+        return isDeleted ? null : current;
+      });
+      setDirectFile((current) => {
+        const isDeleted = current && (current.key === item.key || (isFolder && current.key.startsWith(item.key)));
+        return isDeleted ? null : current;
+      });
+      if (browsePath) {
+        await openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm });
+      } else {
+        setShares((current) => current.filter(
+          (share) => share.file_key !== item.key && !(isFolder && share.file_key.startsWith(item.key))
+        ));
+      }
+    } catch {
+      alert("Cannot connect to server");
+    }
+  }
+
   function openMenu(event, item, isFolder) {
     event.preventDefault();
     event.stopPropagation();
@@ -296,7 +340,7 @@ export default function SharedWithMe() {
     const menuWidth = 210;
     let left = Math.max(8, rect.right - menuWidth);
     if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
-    const estimatedHeight = isFolder ? 140 : 230;
+    const estimatedHeight = isFolder ? 180 : 270;
     let top = rect.bottom + 4;
     if (top + estimatedHeight > window.innerHeight - 8) top = Math.max(8, rect.top - estimatedHeight - 4);
     setMenu({ item, isFolder, permission: item.permission || browsePerm, top, left });
@@ -315,13 +359,17 @@ export default function SharedWithMe() {
     return (
       <div ref={menuPanelRef} className="menu-floating" style={{ top: menu.top, left: menu.left }}>
         {menu.isFolder ? (
-          <button type="button" onClick={() => openMenuFolder(item)}>{t("open")}</button>
+          <>
+            <button type="button" onClick={() => openMenuFolder(item)}>{t("open")}</button>
+            {canWrite && <button type="button" className="danger" onClick={() => deleteSharedItem(item, true)}>{t("deleteFolder")}</button>}
+          </>
         ) : (
           <>
             {canPreview && <button type="button" onClick={() => { setMenu(null); setPreviewModal({ key: item.key, name: item.name }); }}>{t("preview")}</button>}
             <button type="button" onClick={() => { setMenu(null); handleDownload(item.key, item.name); }}>{t("download")}</button>
             <button type="button" onClick={() => { setMenu(null); copyFileLink(item.key); }}>{t("copyLink")}</button>
             {canWrite && <button type="button" onClick={() => { setMenu(null); startReplace({ file_key: item.key, id: item.id || item.key }); }}>{t("updateFile")}</button>}
+            {canWrite && <button type="button" className="danger" onClick={() => deleteSharedItem(item, false)}>{t("moveToTrash")}</button>}
           </>
         )}
       </div>
@@ -427,17 +475,17 @@ export default function SharedWithMe() {
               {folderFolders.map((folder) => (
                 <FileCard
                   key={folder.key}
-                  item={{ key: folder.key, name: folder.name, type: "folder" }}
+                  item={{ key: folder.key, name: folder.name, type: "folder", permission: folder.permission || browsePerm }}
                   folder
-                  onMenu={(event, item) => openMenu(event, { ...item, permission: browsePerm }, true)}
-                  onOpen={(key) => openSharedFolder({ file_key: key, file_name: folder.name, permission: browsePerm })}
+                  onMenu={(event, item) => openMenu(event, { ...item, permission: folder.permission || browsePerm }, true)}
+                  onOpen={(key) => openSharedFolder({ file_key: key, file_name: folder.name, permission: folder.permission || browsePerm })}
                 />
               ))}
               {folderFiles.map((file) => (
                 <FileCard
                   key={file.key}
-                  item={{ key: file.key, name: file.name, type: file.type, sizeLabel: formatSize(file.size) }}
-                  onMenu={(event, item) => openMenu(event, { ...item, permission: browsePerm }, false)}
+                  item={{ key: file.key, name: file.name, type: file.type, permission: file.permission, sizeLabel: formatSize(file.size) }}
+                  onMenu={(event, item) => openMenu(event, { ...item, permission: file.permission || browsePerm }, false)}
                   previewable={file.type !== "file"}
                   onOpen={(selected) => setPreviewModal({ key: selected.key, name: selected.name })}
                 />
