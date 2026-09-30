@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "../config.js";
 
 const FILE_TYPES = {
@@ -23,8 +23,10 @@ function TypeIcon({ type = "file", folder = false, size = 52 }) {
   );
 }
 
-export default function FileCard({ item, folder = false, favorite = false, onOpen, onMenu, meta, actions, showMenu = true, previewable = false }) {
+export default function FileCard({ item, folder = false, favorite = false, onOpen, onMenu, meta, actions, showMenu = true, previewable = false, onFileDrop, dropHint }) {
   const [previewUrl, setPreviewUrl] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
   const isMedia = !folder && (item.type === "image" || item.type === "video");
 
   useEffect(() => {
@@ -51,8 +53,47 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
     else if (previewable) onOpen?.(item);
   }
 
+  function handleDragEnter(event) {
+    if (!onFileDrop || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current += 1;
+    setDragActive(true);
+  }
+
+  function handleDragOver(event) {
+    if (!onFileDrop || !event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleDragLeave(event) {
+    if (!onFileDrop) return;
+    event.stopPropagation();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragActive(false);
+  }
+
+  function handleDrop(event) {
+    if (!onFileDrop || !event.dataTransfer.files?.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = 0;
+    setDragActive(false);
+    onFileDrop(Array.from(event.dataTransfer.files));
+  }
+
   return (
-    <article className="file-card" onDoubleClick={handleOpen}>
+    <article
+      className={`file-card${dragActive ? " file-card-drop-target" : ""}`}
+      onDoubleClick={handleOpen}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragActive && <div className="file-card-drop-hint" aria-hidden="true">{dropHint}</div>}
       <button className="file-card-preview" type="button" onClick={handleOpen} aria-label={folder ? `Open ${item.name}` : `Preview ${item.name}`}>
         {previewUrl && item.type === "image" ? <img src={previewUrl} alt="" className="file-card-thumbnail" /> : previewUrl && item.type === "video" ? <video src={previewUrl} className="file-card-thumbnail" muted preload="metadata" /> : <TypeIcon type={item.type} folder={folder} />}
       </button>

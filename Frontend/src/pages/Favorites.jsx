@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import ActionModal from "../components/shared/ActionModal.jsx";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -11,6 +12,7 @@ export default function Favorites() {
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [renameTarget, setRenameTarget] = useState(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -67,6 +69,35 @@ export default function Favorites() {
     }
   }
 
+  async function handleRename(item) {
+    setRenameTarget(item);
+  }
+
+  async function submitRename(newName) {
+    const item = renameTarget;
+    if (!item || !newName.trim() || newName.trim() === item.file_name) return false;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: item.file_key, newName: newName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not rename file");
+        return false;
+      }
+      setFavorites((current) => current.map((favorite) => favorite.file_key === item.file_key
+        ? { ...favorite, file_key: data.key, file_name: data.name }
+        : favorite));
+        return true;
+    } catch {
+      alert("Cannot connect to server");
+        return false;
+    }
+  }
+
   return (
     <div>
       <h2 className="page-heading">{t("favoritesTitle")}</h2>
@@ -98,6 +129,9 @@ export default function Favorites() {
                   <td>{formatDate(item.created_at)}</td>
                   <td>
                     <div className="row-actions">
+                      {item.permission === "Read & Write" && (
+                        <button className="btn btn-outline" onClick={() => handleRename(item)}>{t("rename")}</button>
+                      )}
                       <button className="btn btn-outline" onClick={() => handleRemove(item)}>
                         {t("remove")}
                       </button>
@@ -109,6 +143,20 @@ export default function Favorites() {
           </table>
         )}
       </div>
+      <ActionModal
+        key={renameTarget?.file_key || "rename-closed"}
+        open={Boolean(renameTarget)}
+        mode="rename"
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+        itemName={renameTarget?.file_name}
+        initialValue={renameTarget?.file_name || ""}
+        inputLabel={t("renameLabel")}
+        confirmLabel={t("saveChanges")}
+        cancelLabel={t("cancel")}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={submitRename}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
+import ActionModal from "../components/shared/ActionModal.jsx";
 
 function formatSize(bytes) {
   if (bytes == null) return "—";
@@ -18,7 +19,37 @@ export default function Recent() {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [renameTarget, setRenameTarget] = useState(null);
   const [, setTick] = useState(0);
+
+  async function handleRename(file) {
+    setRenameTarget(file);
+  }
+
+  async function submitRename(newName) {
+    const file = renameTarget;
+    if (!file || !newName.trim() || newName.trim() === file.name) return false;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: file.key, newName: newName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not rename file");
+        return false;
+      }
+      setFiles((current) => current.map((entry) => entry.key === file.key
+        ? { ...entry, key: data.key, name: data.name }
+        : entry));
+      return true;
+    } catch {
+      alert("Cannot connect to server");
+      return false;
+    }
+  }
 
   useEffect(() => {
     const onLang = () => setTick((x) => x + 1);
@@ -72,6 +103,7 @@ export default function Recent() {
                 <th>{t("name")}</th>
                 <th>{t("size")}</th>
                 <th>{t("lastModified")}</th>
+                <th>{t("actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -80,12 +112,31 @@ export default function Recent() {
                   <td style={{ fontWeight: 600 }}>{f.name}</td>
                   <td>{formatSize(f.size)}</td>
                   <td>{formatDate(f.lastModified)}</td>
+                  <td>
+                    {f.permission === "Read & Write" && (
+                      <button className="btn btn-outline" onClick={() => handleRename(f)}>{t("rename")}</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+      <ActionModal
+        key={renameTarget?.key || "rename-closed"}
+        open={Boolean(renameTarget)}
+        mode="rename"
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+        itemName={renameTarget?.name}
+        initialValue={renameTarget?.name || ""}
+        inputLabel={t("renameLabel")}
+        confirmLabel={t("saveChanges")}
+        cancelLabel={t("cancel")}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={submitRename}
+      />
     </div>
   );
 }

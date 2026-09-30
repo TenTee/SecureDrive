@@ -4,6 +4,7 @@ import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import FileCard from "../components/FileCard.jsx";
+import ActionModal from "../components/shared/ActionModal.jsx";
 
 function formatSize(bytes) {
   if (bytes == null) return "—";
@@ -69,6 +70,7 @@ export default function MyFiles() {
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
   const [moveModal, setMoveModal] = useState(null);
   const [shareModal, setShareModal] = useState(null);
   const [shareRecipients, setShareRecipients] = useState([]);
@@ -82,6 +84,7 @@ export default function MyFiles() {
   const [toasts, setToasts] = useState([]);
   const [, setTick] = useState(0);
   const [previewModal, setPreviewModal] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
 
   const uploadInputRef = useRef(null);
   const menuPanelRef = useRef(null);
@@ -268,6 +271,43 @@ export default function MyFiles() {
     e.target.value = "";
   }
 
+  async function uploadDroppedFiles(fileList, destinationPath = path) {
+    const droppedFiles = Array.from(fileList || []);
+    if (!droppedFiles.length) return;
+
+    const token = localStorage.getItem("token");
+    const results = await Promise.all(droppedFiles.map(async (file) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("path", destinationPath);
+      try {
+        const response = await fetch(`${API_BASE}/api/files/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+        return { ok: response.ok, error: data.error };
+      } catch {
+        return { ok: false, error: "Cannot connect to server" };
+      }
+    }));
+
+    const uploadedCount = results.filter((result) => result.ok).length;
+    if (uploadedCount) {
+      showToast(`${uploadedCount} ${t("dropUploadComplete")}`);
+      load(path);
+    }
+    const failure = results.find((result) => !result.ok);
+    if (failure) showToast(failure.error || t("dropUploadFailed"), "error");
+  }
+
+  function handleFolderDrop(event, destinationPath = path) {
+    event.preventDefault();
+    setDropActive(false);
+    uploadDroppedFiles(event.dataTransfer.files, destinationPath);
+  }
+
   function handlePreview(file) {
     setMenu(null);
     setPreviewModal({ key: file.key, name: file.name });
@@ -281,6 +321,39 @@ export default function MyFiles() {
       showToast(t("linkCopied"));
     } catch {
       window.prompt(t("copyLink"), link);
+    }
+  }
+
+  async function renameItem(item) {
+    setMenu(null);
+    setRenameTarget(item);
+  }
+
+  async function submitRename(newName) {
+    const item = renameTarget;
+    if (!item || !newName.trim() || newName.trim() === item.name) return false;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/rename`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ key: item.key, newName: newName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || "Could not rename item", "error");
+        return false;
+      }
+      showToast(t("renameSuccess"));
+      await load(path);
+      loadFavorites();
+      return true;
+    } catch {
+      showToast("Cannot connect to server", "error");
+      return false;
     }
   }
 
@@ -802,7 +875,20 @@ export default function MyFiles() {
         <div style={{ color: "#ef4444", marginBottom: 12, fontSize: "0.85rem" }}>{error}</div>
       )}
 
-      <div className="table-card myfiles-table-wrap">
+      <div
+        className={`table-card myfiles-table-wrap${dropActive ? " files-drop-active" : ""}`}
+        onDragEnter={(event) => {
+          if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDropActive(true); }
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setDropActive(false);
+        }}
+        onDrop={(event) => handleFolderDrop(event, path)}
+      >
+        {dropActive && <div className="files-drop-hint">{t("dropFilesHere")}</div>}
         {loading ? (
           <div style={{ padding: 24, textAlign: "center" }}>{t("loading")}</div>
         ) : folders.length === 0 && files.length === 0 ? (
@@ -813,7 +899,15 @@ export default function MyFiles() {
         ) : (
           <div className="file-card-grid">
             {folders.map((folder) => (
-              <FileCard key={folder.key} item={folder} folder onOpen={openFolder} onMenu={openMenu} />
+              <FileCard
+                key={folder.key}
+                item={folder}
+                folder
+                onOpen={openFolder}
+                onMenu={openMenu}
+                dropHint={t("dropFilesIntoFolder")}
+                onFileDrop={(droppedFiles) => uploadDroppedFiles(droppedFiles, folder.key)}
+              />
             ))}
             {files.map((file) => (
               <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} onOpen={handlePreview} onMenu={openMenu} />
@@ -833,6 +927,7 @@ export default function MyFiles() {
               <button type="button" onClick={() => openFolder(menu.item.key)}>
                 {t("open")}
               </button>
+              <button type="button" onClick={() => renameItem(menu.item)}>{t("rename")}</button>
               <button
                 type="button"
                 onClick={() => {
@@ -863,6 +958,7 @@ export default function MyFiles() {
               <button type="button" onClick={() => requestDownload(menu.item)}>
                 {t("download")}
               </button>
+              <button type="button" onClick={() => renameItem(menu.item)}>{t("rename")}</button>
               <button type="button" onClick={() => copyFileLink(menu.item)}>
                 {t("copyLink")}
               </button>
@@ -1058,34 +1154,36 @@ export default function MyFiles() {
       )}
 
       {confirm && (
-        <Modal onClose={() => setConfirm(null)}>
-          <h3 style={{ margin: "0 0 8px", fontSize: "1.15rem" }}>{confirm.title}</h3>
-          <p style={{ margin: "0 0 20px", color: "#64748b", fontSize: "0.95rem" }}>
-            {confirm.message}
-          </p>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button type="button" className="btn btn-outline" onClick={() => setConfirm(null)}>
-              {t("cancel")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-solid"
-              style={
-                confirm.danger
-                  ? { background: "#dc2626", borderColor: "#dc2626" }
-                  : undefined
-              }
-              onClick={() => {
-                const fn = confirm.onConfirm;
-                setConfirm(null);
-                fn?.();
-              }}
-            >
-              {confirm.confirmLabel}
-            </button>
-          </div>
-        </Modal>
+        <ActionModal
+          open
+          title={confirm.title}
+          description={confirm.message}
+          confirmLabel={confirm.confirmLabel}
+          cancelLabel={t("cancel")}
+          danger={confirm.danger}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => {
+            const fn = confirm.onConfirm;
+            setConfirm(null);
+            fn?.();
+          }}
+        />
       )}
+
+      <ActionModal
+        key={renameTarget?.key || "rename-closed"}
+        open={Boolean(renameTarget)}
+        mode="rename"
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+        itemName={renameTarget?.name}
+        initialValue={renameTarget?.name || ""}
+        inputLabel={t("renameLabel")}
+        confirmLabel={t("saveChanges")}
+        cancelLabel={t("cancel")}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={submitRename}
+      />
 
       {previewModal && (
         <FilePreviewModal

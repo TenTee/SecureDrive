@@ -56,6 +56,18 @@ async function deleteKeys(s3, keys) {
   }
 }
 
+async function objectExists(s3, key) {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    return true;
+  } catch (err) {
+    if (err?.$metadata?.httpStatusCode === 404 || ["NotFound", "NoSuchKey"].includes(err?.name)) {
+      return false;
+    }
+    throw err;
+  }
+}
+
 async function removeSharesForDeletedKey(key, isFolder) {
   if (isFolder) {
     await pool.query(
@@ -70,6 +82,113 @@ async function removeSharesForDeletedKey(key, isFolder) {
 function sanitizeFileName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
+
+function encodeCopySource(key) {
+  return encodeURIComponent(`${BUCKET_NAME}/${key}`).replace(/%2F/g, "/");
+}
+
+// POST /api/files/rename
+router.post("/rename", requireAuth, async (req, res) => {
+  let client;
+  let copiedKeys = [];
+  let referencesCommitted = false;
+  try {
+    client = await pool.connect();
+    const { key } = req.body;
+    const rawName = typeof req.body.newName === "string" ? req.body.newName.trim() : "";
+    if (!key || !rawName) return res.status(400).json({ error: "File key and new name are required" });
+    if (!key.startsWith("uploads/") || key === "uploads/" || key.endsWith(".keep")) {
+      return res.status(400).json({ error: "Only files and folders in uploads/ can be renamed" });
+    }
+    if (rawName === "." || rawName === ".." || /[\\/]/.test(rawName)) {
+      return res.status(400).json({ error: "The new name cannot contain path separators" });
+    }
+    const safeName = sanitizeFileName(rawName);
+    if (!safeName || safeName === "." || safeName === "..") {
+      return res.status(400).json({ error: "Invalid name" });
+    }
+    if (!(await canAccessKey(key, req.user, { needWrite: true }))) {
+      return res.status(403).json({ error: "You don't have permission to rename this item." });
+    }
+
+    const isFolder = key.endsWith("/");
+    const oldLeaf = key.slice(0, isFolder ? -1 : undefined).split("/").pop();
+    const parent = key.slice(0, key.lastIndexOf("/") + 1);
+    const uuidPrefix = !isFolder
+      ? (oldLeaf.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-)/i)?.[1] || "")
+      : "";
+    const newLeaf = `${uuidPrefix}${safeName}`;
+    const newKey = `${parent}${newLeaf}${isFolder ? "/" : ""}`;
+    if (newKey === key) return res.status(400).json({ error: "The new name is unchanged" });
+
+    const s3 = await getTemporaryS3Client(`user-${req.user.userId}`);
+    const sourceKeys = isFolder ? await listAllKeys(s3, key) : [key];
+    if (sourceKeys.length === 0) return res.status(404).json({ error: "Item not found" });
+    const destinationStem = isFolder ? newKey.slice(0, -1) : newKey;
+    const destinationExists = await objectExists(s3, destinationStem) ||
+      (await listAllKeys(s3, `${destinationStem}/`)).length > 0;
+    if (destinationExists) return res.status(409).json({ error: "An item with this name already exists" });
+
+    for (const sourceKey of sourceKeys) {
+      const destinationKey = `${newKey}${sourceKey.slice(key.length)}`;
+      await s3.send(new CopyObjectCommand({
+        Bucket: BUCKET_NAME,
+        CopySource: encodeCopySource(sourceKey),
+        Key: destinationKey,
+        MetadataDirective: "COPY",
+      }));
+      copiedKeys.push(destinationKey);
+    }
+
+    await client.query("BEGIN");
+    if (isFolder) {
+      await client.query(
+        `UPDATE shares
+         SET file_key = $2 || substring(file_key from length($1) + 1),
+             file_name = CASE WHEN file_key = $1 THEN $3 ELSE file_name END
+         WHERE file_key = $1 OR LEFT(file_key, LENGTH($1)) = $1`,
+        [key, newKey, safeName]
+      );
+      await client.query(
+        `UPDATE favorites
+         SET file_key = $2 || substring(file_key from length($1) + 1),
+             file_name = CASE WHEN file_key = $1 THEN $3 ELSE file_name END
+         WHERE file_key = $1 OR LEFT(file_key, LENGTH($1)) = $1`,
+        [key, newKey, safeName]
+      );
+    } else {
+      await client.query(`UPDATE shares SET file_key = $2, file_name = $3 WHERE file_key = $1`, [key, newKey, safeName]);
+      await client.query(`UPDATE favorites SET file_key = $2, file_name = $3 WHERE file_key = $1`, [key, newKey, safeName]);
+    }
+    await client.query("COMMIT");
+    referencesCommitted = true;
+
+    try {
+      await deleteKeys(s3, sourceKeys);
+    } catch (cleanupError) {
+      console.error("Old key cleanup after rename failed:", cleanupError.message);
+    }
+    await logActivity({
+      userId: req.user.userId,
+      userName: req.user.email || `User #${req.user.userId}`,
+      action: isFolder ? "Renamed a folder" : "Renamed a file",
+      detail: `${key} → ${newKey}`,
+    });
+    res.json({ message: "Item renamed", key: newKey, name: safeName, isFolder });
+  } catch (err) {
+    if (!referencesCommitted) {
+      try { await client?.query("ROLLBACK"); } catch { /* transaction may not have started */ }
+    }
+    if (!referencesCommitted && copiedKeys.length > 0) {
+      try { await deleteKeys(await getTemporaryS3Client(`user-${req.user.userId}`), copiedKeys); }
+      catch (cleanupError) { console.error("Rename cleanup error:", cleanupError.message); }
+    }
+    console.error("Rename error:", err.message);
+    res.status(500).json({ error: "Could not rename item", details: err.message });
+  } finally {
+    client?.release();
+  }
+});
 
 // GET /api/files?path=
 router.get("/", requireAuth, async (req, res) => {

@@ -4,6 +4,7 @@ import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
 import FileCard from "../components/FileCard.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
+import ActionModal from "../components/shared/ActionModal.jsx";
 
 function cleanName(key) {
   const raw = (key || "").split("/").filter(Boolean).pop() || key || "file";
@@ -45,7 +46,11 @@ export default function SharedWithMe() {
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browsePerm, setBrowsePerm] = useState("Read Only");
   const [uploadTransfer, setUploadTransfer] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
+  const [dropUploadStatus, setDropUploadStatus] = useState("");
   const [menu, setMenu] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const menuPanelRef = useRef(null);
   const uploadRequestRef = useRef(null);
   const browseRequestRef = useRef(0);
@@ -245,6 +250,39 @@ export default function SharedWithMe() {
     request.send(formData);
   }
 
+  async function uploadDroppedFiles(fileList, destinationPath) {
+    const droppedFiles = Array.from(fileList || []);
+    if (!droppedFiles.length) return;
+    setDropUploadStatus(t("uploadingDroppedFiles", { count: droppedFiles.length }));
+    const token = localStorage.getItem("token");
+    const results = await Promise.all(droppedFiles.map(async (file) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("path", destinationPath);
+      try {
+        const response = await fetch(`${API_BASE}/api/files/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const data = await response.json().catch(() => ({}));
+        return { ok: response.ok, error: data.error };
+      } catch {
+        return { ok: false, error: "Cannot connect to server" };
+      }
+    }));
+
+    const uploadedCount = results.filter((result) => result.ok).length;
+    if (uploadedCount) {
+      setDropUploadStatus(`${uploadedCount} ${t("dropUploadComplete")}`);
+      if (browsePath) await openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm });
+      else await loadShares();
+    }
+    const failure = results.find((result) => !result.ok);
+    if (failure) setDropUploadStatus(failure.error || t("dropUploadFailed"));
+    window.setTimeout(() => setDropUploadStatus(""), 4000);
+  }
+
   function cancelUpload() {
     uploadRequestRef.current?.abort();
     uploadRequestRef.current = null;
@@ -291,13 +329,50 @@ export default function SharedWithMe() {
     }
   }
 
+  async function renameSharedItem(item) {
+    setMenu(null);
+    setRenameTarget(item);
+  }
+
+  async function submitSharedRename(newName) {
+    const item = renameTarget;
+    if (!item || !newName.trim() || newName.trim() === item.name) return false;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/rename`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ key: item.key, newName: newName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not rename item");
+        return false;
+      }
+      if (browsePath) {
+        await openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm });
+      } else {
+        await loadShares();
+      }
+      if (previewModal?.key === item.key) setPreviewModal({ key: data.key, name: data.name });
+      return true;
+    } catch {
+      alert("Cannot connect to server");
+      return false;
+    }
+  }
+
   async function deleteSharedItem(item, isFolder) {
     setMenu(null);
-    const prompt = isFolder
-      ? `${t("deleteSharedFolderConfirm")} "${item.name}"?`
-      : `${t("deleteSharedFileConfirm")} "${item.name}"?`;
-    if (!window.confirm(prompt)) return;
+    setDeleteTarget({ item, isFolder });
+  }
 
+  async function confirmDeleteSharedItem() {
+    const { item, isFolder } = deleteTarget || {};
+    if (!item) return false;
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(`${API_BASE}/api/files/trash`, {
@@ -311,7 +386,7 @@ export default function SharedWithMe() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         alert(data.error || "Could not delete shared item");
-        return;
+        return false;
       }
 
       setPreviewModal((current) => {
@@ -329,8 +404,10 @@ export default function SharedWithMe() {
           (share) => share.file_key !== item.key && !(isFolder && share.file_key.startsWith(item.key))
         ));
       }
+      return true;
     } catch {
       alert("Cannot connect to server");
+      return false;
     }
   }
 
@@ -341,7 +418,7 @@ export default function SharedWithMe() {
     const menuWidth = 210;
     let left = Math.max(8, rect.right - menuWidth);
     if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
-    const estimatedHeight = isFolder ? 180 : 270;
+    const estimatedHeight = isFolder ? 220 : 310;
     let top = rect.bottom + 4;
     if (top + estimatedHeight > window.innerHeight - 8) top = Math.max(8, rect.top - estimatedHeight - 4);
     setMenu({ item, isFolder, permission: item.permission || browsePerm, top, left });
@@ -362,6 +439,7 @@ export default function SharedWithMe() {
         {menu.isFolder ? (
           <>
             <button type="button" onClick={() => openMenuFolder(item)}>{t("open")}</button>
+            {canWrite && <button type="button" onClick={() => renameSharedItem(item)}>{t("rename")}</button>}
             {canWrite && <button type="button" className="danger" onClick={() => deleteSharedItem(item, true)}>{t("deleteFolder")}</button>}
           </>
         ) : (
@@ -369,6 +447,7 @@ export default function SharedWithMe() {
             {canPreview && <button type="button" onClick={() => { setMenu(null); setPreviewModal({ key: item.key, name: item.name }); }}>{t("preview")}</button>}
             <button type="button" onClick={() => { setMenu(null); handleDownload(item.key, item.name); }}>{t("download")}</button>
             <button type="button" onClick={() => { setMenu(null); copyFileLink(item.key); }}>{t("copyLink")}</button>
+            {canWrite && <button type="button" onClick={() => renameSharedItem(item)}>{t("rename")}</button>}
             {canWrite && <button type="button" onClick={() => { setMenu(null); startReplace({ file_key: item.key, id: item.id || item.key }); }}>{t("updateFile")}</button>}
             {canWrite && <button type="button" className="danger" onClick={() => deleteSharedItem(item, false)}>{t("moveToTrash")}</button>}
           </>
@@ -464,7 +543,27 @@ export default function SharedWithMe() {
 
         {error && <div style={{ color: "#ef4444", marginBottom: 12 }}>{error}</div>}
 
-        <div className="table-card">
+        <div
+          className={`table-card${dropActive ? " files-drop-active" : ""}`}
+          onDragEnter={(event) => {
+            if (browsePerm === "Read & Write" && event.dataTransfer.types.includes("Files")) {
+              event.preventDefault();
+              setDropActive(true);
+            }
+          }}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setDropActive(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDropActive(false);
+            if (browsePerm === "Read & Write") uploadDroppedFiles(event.dataTransfer.files, browsePath);
+          }}
+        >
+          {dropActive && <div className="files-drop-hint">{t("dropFilesHere")}</div>}
           {browseLoading ? (
             <div style={{ padding: 24, textAlign: "center" }}>{t("loading")}</div>
           ) : folderFolders.length === 0 && folderFiles.length === 0 ? (
@@ -480,6 +579,10 @@ export default function SharedWithMe() {
                   folder
                   onMenu={(event, item) => openMenu(event, { ...item, permission: folder.permission || browsePerm }, true)}
                   onOpen={(key) => openSharedFolder({ file_key: key, file_name: folder.name, permission: folder.permission || browsePerm })}
+                  dropHint={t("dropFilesIntoFolder")}
+                  onFileDrop={folder.permission === "Read & Write"
+                    ? (droppedFiles) => uploadDroppedFiles(droppedFiles, folder.key)
+                    : undefined}
                 />
               ))}
               {folderFiles.map((file) => (
@@ -498,6 +601,7 @@ export default function SharedWithMe() {
         <input ref={fileInputRef} type="file" hidden onChange={onFileChosen} />
         {renderMenu()}
         {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+        {dropUploadStatus && <div className="drop-upload-status" role="status">{dropUploadStatus}</div>}
         {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
         {folderModal && (
           <div className="modal-overlay" onClick={() => !creatingFolder && setFolderModal(false)}>
@@ -518,6 +622,31 @@ export default function SharedWithMe() {
             </form>
           </div>
         )}
+        <ActionModal
+          key={renameTarget?.key || "rename-closed"}
+          open={Boolean(renameTarget)}
+          mode="rename"
+          title={t("renameTitle")}
+          description={t("renameDescription")}
+          itemName={renameTarget?.name}
+          initialValue={renameTarget?.name || ""}
+          inputLabel={t("renameLabel")}
+          confirmLabel={t("saveChanges")}
+          cancelLabel={t("cancel")}
+          onClose={() => setRenameTarget(null)}
+          onConfirm={submitSharedRename}
+        />
+        <ActionModal
+          open={Boolean(deleteTarget)}
+          title={t("confirmDeleteTitle")}
+          description={deleteTarget?.isFolder ? t("confirmDeleteFolder") : t("confirmDeleteFile")}
+          itemName={deleteTarget?.item.name}
+          confirmLabel={deleteTarget?.isFolder ? t("deleteFolder") : t("moveToTrash")}
+          cancelLabel={t("cancel")}
+          danger
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={confirmDeleteSharedItem}
+        />
       </div>
     );
   }
@@ -561,13 +690,38 @@ export default function SharedWithMe() {
               {shares.map((item) => {
                 const folder = isFolderShare(item);
                 const type = guessType(item.file_name);
-                return <FileCard key={item.id} item={{ key: item.file_key, name: item.file_name, type, permission: item.permission, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} onMenu={(event, cardItem, isFolder) => openMenu(event, { ...cardItem, permission: item.permission }, isFolder)} previewable={!folder && type !== "file"} onOpen={(file) => folder ? openSharedFolder(item) : setPreviewModal({ key: file.key, name: file.name })} meta={`${item.owner_first_name || ""} ${item.owner_last_name || ""}`.trim() || item.owner_email} />;
+                return <FileCard key={item.id} item={{ key: item.file_key, name: item.file_name, type, permission: item.permission, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} onMenu={(event, cardItem, isFolder) => openMenu(event, { ...cardItem, permission: item.permission }, isFolder)} previewable={!folder && type !== "file"} onOpen={(file) => folder ? openSharedFolder(item) : setPreviewModal({ key: file.key, name: file.name })} meta={`${item.owner_first_name || ""} ${item.owner_last_name || ""}`.trim() || item.owner_email} dropHint={t("dropFilesIntoFolder")} onFileDrop={folder && item.permission === "Read & Write" ? (droppedFiles) => uploadDroppedFiles(droppedFiles, item.file_key) : undefined} />;
               })}
           </div>
         )}
       </div>
       {renderMenu()}
       {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+      <ActionModal
+        key={renameTarget?.key || "rename-closed"}
+        open={Boolean(renameTarget)}
+        mode="rename"
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+        itemName={renameTarget?.name}
+        initialValue={renameTarget?.name || ""}
+        inputLabel={t("renameLabel")}
+        confirmLabel={t("saveChanges")}
+        cancelLabel={t("cancel")}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={submitSharedRename}
+      />
+      <ActionModal
+        open={Boolean(deleteTarget)}
+        title={t("confirmDeleteTitle")}
+        description={deleteTarget?.isFolder ? t("confirmDeleteFolder") : t("confirmDeleteFile")}
+        itemName={deleteTarget?.item.name}
+        confirmLabel={deleteTarget?.isFolder ? t("deleteFolder") : t("moveToTrash")}
+        cancelLabel={t("cancel")}
+        danger
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDeleteSharedItem}
+      />
     </div>
   );
 }

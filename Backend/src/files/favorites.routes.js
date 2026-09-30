@@ -5,6 +5,7 @@ import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { BUCKET_NAME } from "../config/s3Client.js";
 import { getTemporaryS3Client } from "../config/stsClient.js";
 import { logActivity } from "../activity/activity.routes.js";
+import { getKeyPermission } from "./access.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -43,7 +44,11 @@ router.get("/recent", async (req, res) => {
       .sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified))
       .slice(0, 30);
 
-    res.json({ count: files.length, files });
+    const filesWithPermissions = await Promise.all(files.map(async (file) => ({
+      ...file,
+      permission: await getKeyPermission(file.key, req.user),
+    })));
+    res.json({ count: filesWithPermissions.length, files: filesWithPermissions });
   } catch (err) {
     console.error("Recent files error:", err.message);
     res.status(500).json({ error: "Could not load recent files" });
@@ -60,7 +65,11 @@ router.get("/", async (req, res) => {
        ORDER BY created_at DESC`,
       [req.user.userId]
     );
-    res.json({ count: result.rows.length, favorites: result.rows });
+    const favorites = await Promise.all(result.rows.map(async (item) => ({
+      ...item,
+      permission: await getKeyPermission(item.file_key, req.user),
+    })));
+    res.json({ count: favorites.length, favorites });
   } catch (err) {
     console.error("List favorites error:", err.message);
     res.status(500).json({ error: "Could not load favorites" });

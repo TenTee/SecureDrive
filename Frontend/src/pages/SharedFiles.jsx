@@ -3,6 +3,7 @@ import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
 import FileCard from "../components/FileCard.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
+import ActionModal from "../components/shared/ActionModal.jsx";
 
 function guessType(name) {
   const ext = (name || "").split(".").pop().toLowerCase();
@@ -17,6 +18,8 @@ export default function SharedFiles() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [previewModal, setPreviewModal] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [removeTarget, setRemoveTarget] = useState(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -61,12 +64,19 @@ export default function SharedFiles() {
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || "Could not remove share");
-        return;
+        return false;
       }
       setShares((prev) => prev.filter((s) => s.id !== shareId));
+      return true;
     } catch {
       alert("Cannot connect to server");
+      return false;
     }
+  }
+
+  async function confirmRemoveShare() {
+    if (!removeTarget) return false;
+    return handleRemoveShare(removeTarget.id);
   }
 
   async function copyFileLink(fileKey) {
@@ -76,6 +86,33 @@ export default function SharedFiles() {
       alert(t("linkCopied"));
     } catch {
       window.prompt(t("copyLink"), link);
+    }
+  }
+
+  async function handleRename(item) {
+    setRenameTarget(item);
+  }
+
+  async function submitRename(newName) {
+    const item = renameTarget;
+    if (!item || !newName.trim() || newName.trim() === item.file_name) return false;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: item.file_key, newName: newName.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not rename item");
+        return false;
+      }
+      await loadShares();
+      return true;
+    } catch {
+      alert("Cannot connect to server");
+      return false;
     }
   }
 
@@ -112,12 +149,37 @@ export default function SharedFiles() {
               const name = item.file_name || "file";
               const folder = item.isFolder === true || item.file_key?.endsWith("/");
               const type = guessType(name);
-              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<>{!folder && <button className="btn btn-outline" onClick={() => copyFileLink(item.file_key)}>{t("copyLink")}</button>}<button className="btn btn-outline" onClick={() => handleRemoveShare(item.id)}>{t("removeAccess")}</button></>} />;
+              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && type !== "file"} onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<>{!folder && <button className="btn btn-outline" onClick={() => copyFileLink(item.file_key)}>{t("copyLink")}</button>}<button className="btn btn-outline" onClick={() => handleRename(item)}>{t("rename")}</button><button className="btn btn-outline" onClick={() => setRemoveTarget(item)}>{t("removeAccess")}</button></>} />;
             })}
           </div>
         )}
       </div>
       {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+      <ActionModal
+        key={renameTarget?.file_key || "rename-closed"}
+        open={Boolean(renameTarget)}
+        mode="rename"
+        title={t("renameTitle")}
+        description={t("renameDescription")}
+        itemName={renameTarget?.file_name}
+        initialValue={renameTarget?.file_name || ""}
+        inputLabel={t("renameLabel")}
+        confirmLabel={t("saveChanges")}
+        cancelLabel={t("cancel")}
+        onClose={() => setRenameTarget(null)}
+        onConfirm={submitRename}
+      />
+      <ActionModal
+        open={Boolean(removeTarget)}
+        title={t("confirmDeleteTitle")}
+        description={t("removeAccessConfirm")}
+        itemName={removeTarget?.file_name}
+        confirmLabel={t("removeAccess")}
+        cancelLabel={t("cancel")}
+        danger
+        onClose={() => setRemoveTarget(null)}
+        onConfirm={confirmRemoveShare}
+      />
     </div>
   );
 }
