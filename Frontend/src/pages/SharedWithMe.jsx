@@ -47,7 +47,6 @@ export default function SharedWithMe() {
   const [browsePerm, setBrowsePerm] = useState("Read Only");
   const [uploadTransfer, setUploadTransfer] = useState(null);
   const [dropActive, setDropActive] = useState(false);
-  const [dropUploadStatus, setDropUploadStatus] = useState("");
   const [menu, setMenu] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -253,34 +252,54 @@ export default function SharedWithMe() {
   async function uploadDroppedFiles(fileList, destinationPath) {
     const droppedFiles = Array.from(fileList || []);
     if (!droppedFiles.length) return;
-    setDropUploadStatus(t("uploadingDroppedFiles", { count: droppedFiles.length }));
     const token = localStorage.getItem("token");
-    const results = await Promise.all(droppedFiles.map(async (file) => {
+    const total = droppedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+    let completedBytes = 0;
+    let uploadedCount = 0;
+    let firstError = "";
+    setUploadTransfer({ name: droppedFiles[0].name, loaded: 0, total, progress: 0 });
+
+    for (const file of droppedFiles) {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("path", destinationPath);
-      try {
-        const response = await fetch(`${API_BASE}/api/files/upload`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        const data = await response.json().catch(() => ({}));
-        return { ok: response.ok, error: data.error };
-      } catch {
-        return { ok: false, error: "Cannot connect to server" };
+      const result = await new Promise((resolve) => {
+        const request = new XMLHttpRequest();
+        uploadRequestRef.current = request;
+        request.open("POST", `${API_BASE}/api/files/upload`);
+        request.setRequestHeader("Authorization", `Bearer ${token}`);
+        request.responseType = "json";
+        request.upload.onprogress = (event) => {
+          const currentLoaded = event.lengthComputable ? Math.min(file.size || 0, event.loaded) : 0;
+          const loaded = Math.min(total, completedBytes + currentLoaded);
+          setUploadTransfer({ name: file.name, loaded, total, progress: total ? Math.round(loaded / total * 100) : 0 });
+        };
+        request.onload = () => {
+          const data = request.response || {};
+          resolve({ ok: request.status >= 200 && request.status < 300, error: data.error });
+        };
+        request.onerror = () => resolve({ ok: false, error: "Cannot connect to server" });
+        request.onabort = () => resolve({ ok: false, aborted: true });
+        request.send(formData);
+      });
+      uploadRequestRef.current = null;
+      if (result.aborted) {
+        setUploadTransfer(null);
+        return;
       }
-    }));
+      if (result.ok) uploadedCount += 1;
+      else firstError ||= result.error || t("dropUploadFailed");
+      completedBytes += file.size || 0;
+      setUploadTransfer({ name: file.name, loaded: completedBytes, total, progress: total ? Math.round(completedBytes / total * 100) : 100 });
+    }
 
-    const uploadedCount = results.filter((result) => result.ok).length;
     if (uploadedCount) {
-      setDropUploadStatus(`${uploadedCount} ${t("dropUploadComplete")}`);
+      setUploadTransfer({ name: `${uploadedCount} ${t("dropUploadComplete")}`, loaded: total, total, progress: 100, complete: true });
       if (browsePath) await openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm });
       else await loadShares();
     }
-    const failure = results.find((result) => !result.ok);
-    if (failure) setDropUploadStatus(failure.error || t("dropUploadFailed"));
-    window.setTimeout(() => setDropUploadStatus(""), 4000);
+    if (firstError) setUploadTransfer({ error: firstError });
+    if (!firstError || uploadedCount) window.setTimeout(() => setUploadTransfer(null), 2500);
   }
 
   function cancelUpload() {
@@ -601,7 +620,6 @@ export default function SharedWithMe() {
         <input ref={fileInputRef} type="file" hidden onChange={onFileChosen} />
         {renderMenu()}
         {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
-        {dropUploadStatus && <div className="drop-upload-status" role="status">{dropUploadStatus}</div>}
         {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
         {folderModal && (
           <div className="modal-overlay" onClick={() => !creatingFolder && setFolderModal(false)}>
@@ -697,6 +715,7 @@ export default function SharedWithMe() {
       </div>
       {renderMenu()}
       {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
+      {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
       <ActionModal
         key={renameTarget?.key || "rename-closed"}
         open={Boolean(renameTarget)}

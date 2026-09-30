@@ -85,9 +85,11 @@ export default function MyFiles() {
   const [, setTick] = useState(0);
   const [previewModal, setPreviewModal] = useState(null);
   const [dropActive, setDropActive] = useState(false);
+  const [dropUploadTransfer, setDropUploadTransfer] = useState(null);
 
   const uploadInputRef = useRef(null);
   const menuPanelRef = useRef(null);
+  const dropUploadRequestRef = useRef(null);
 
   useEffect(() => {
     const onLang = () => setTick((x) => x + 1);
@@ -276,30 +278,61 @@ export default function MyFiles() {
     if (!droppedFiles.length) return;
 
     const token = localStorage.getItem("token");
-    const results = await Promise.all(droppedFiles.map(async (file) => {
+    const total = droppedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
+    let completedBytes = 0;
+    let uploadedCount = 0;
+    let firstError = "";
+    setDropUploadTransfer({ name: droppedFiles[0].name, loaded: 0, total, progress: 0 });
+
+    for (const file of droppedFiles) {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("path", destinationPath);
-      try {
-        const response = await fetch(`${API_BASE}/api/files/upload`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        const data = await response.json().catch(() => ({}));
-        return { ok: response.ok, error: data.error };
-      } catch {
-        return { ok: false, error: "Cannot connect to server" };
+      const result = await new Promise((resolve) => {
+        const request = new XMLHttpRequest();
+        dropUploadRequestRef.current = request;
+        request.open("POST", `${API_BASE}/api/files/upload`);
+        request.setRequestHeader("Authorization", `Bearer ${token}`);
+        request.responseType = "json";
+        request.upload.onprogress = (event) => {
+          const currentLoaded = event.lengthComputable ? Math.min(file.size || 0, event.loaded) : 0;
+          const loaded = Math.min(total, completedBytes + currentLoaded);
+          setDropUploadTransfer({ name: file.name, loaded, total, progress: total ? Math.round(loaded / total * 100) : 0 });
+        };
+        request.onload = () => {
+          const data = request.response || {};
+          resolve({ ok: request.status >= 200 && request.status < 300, error: data.error });
+        };
+        request.onerror = () => resolve({ ok: false, error: "Cannot connect to server" });
+        request.onabort = () => resolve({ ok: false, aborted: true });
+        request.send(formData);
+      });
+      dropUploadRequestRef.current = null;
+      if (result.aborted) {
+        setDropUploadTransfer(null);
+        return;
       }
-    }));
+      if (result.ok) uploadedCount += 1;
+      else firstError ||= result.error || t("dropUploadFailed");
+      completedBytes += file.size || 0;
+      setDropUploadTransfer({ name: file.name, loaded: completedBytes, total, progress: total ? Math.round(completedBytes / total * 100) : 100 });
+    }
 
-    const uploadedCount = results.filter((result) => result.ok).length;
     if (uploadedCount) {
       showToast(`${uploadedCount} ${t("dropUploadComplete")}`);
       load(path);
     }
-    const failure = results.find((result) => !result.ok);
-    if (failure) showToast(failure.error || t("dropUploadFailed"), "error");
+    if (firstError) showToast(firstError, "error");
+    setDropUploadTransfer(firstError
+      ? { error: firstError }
+      : { name: `${uploadedCount} ${t("dropUploadComplete")}`, loaded: total, total, progress: 100, complete: true });
+    window.setTimeout(() => setDropUploadTransfer(null), 2500);
+  }
+
+  function cancelDroppedUpload() {
+    dropUploadRequestRef.current?.abort();
+    dropUploadRequestRef.current = null;
+    setDropUploadTransfer(null);
   }
 
   function handleFolderDrop(event, destinationPath = path) {
@@ -874,6 +907,24 @@ export default function MyFiles() {
       {error && (
         <div style={{ color: "#ef4444", marginBottom: 12, fontSize: "0.85rem" }}>{error}</div>
       )}
+
+      {dropUploadTransfer && (dropUploadTransfer.error ? (
+        <div className="upload-progress-panel upload-progress-error" role="alert">
+          <strong>{dropUploadTransfer.error}</strong>
+          <button type="button" onClick={cancelDroppedUpload}>{t("cancel")}</button>
+        </div>
+      ) : (
+        <div className="upload-progress-panel" role="status" aria-live="polite">
+          <div className="upload-progress-head">
+            <span className="upload-progress-name" title={dropUploadTransfer.name}>{dropUploadTransfer.name}</span>
+            <span className="upload-progress-value">{dropUploadTransfer.complete ? "100%" : `${dropUploadTransfer.progress}%`}</span>
+          </div>
+          <div className="upload-progress-track" aria-hidden="true">
+            <div className="upload-progress-bar" style={{ width: `${dropUploadTransfer.progress}%` }} />
+          </div>
+          {!dropUploadTransfer.complete && <button className="upload-cancel" type="button" onClick={cancelDroppedUpload}>{t("cancel")}</button>}
+        </div>
+      ))}
 
       <div
         className={`table-card myfiles-table-wrap${dropActive ? " files-drop-active" : ""}`}

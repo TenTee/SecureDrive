@@ -597,7 +597,13 @@ router.post("/trash", requireAuth, async (req, res) => {
       await deleteKeys(s3, sourceKeys);
     }
 
-    await removeSharesForDeletedKey(key, isFolder);
+    let shareCleanupWarning = false;
+    try {
+      await removeSharesForDeletedKey(key, isFolder);
+    } catch (cleanupError) {
+      shareCleanupWarning = true;
+      console.error("Trash succeeded but share cleanup failed:", cleanupError.message);
+    }
 
     await logActivity({
       userId: req.user.userId,
@@ -608,6 +614,7 @@ router.post("/trash", requireAuth, async (req, res) => {
 
     res.json({
       message: isFolder ? "Folder permanently deleted" : "File moved to trash",
+      ...(shareCleanupWarning ? { warning: "File action succeeded, but stale share records could not be cleaned up." } : {}),
       ...(isFolder ? {} : { trashKey }),
     });
   } catch (err) {
