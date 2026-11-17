@@ -38,6 +38,58 @@ router.get("/", async (req, res) => {
       console.error("Notif shares:", e.message);
     }
 
+    // Demandes d'accès : reçues (en attente) et réponses à mes demandes (30 jours)
+    try {
+      const incoming = await pool.query(
+        `SELECT r.id, r.file_key, r.file_name, r.permission, r.message, r.created_at,
+                u.email, u.first_name, u.last_name
+         FROM access_requests r
+         JOIN users u ON u.id = r.requester_id
+         WHERE r.owner_id = $1 AND r.status = 'pending'
+         ORDER BY r.created_at DESC
+         LIMIT 20`,
+        [userId]
+      );
+      for (const r of incoming.rows) {
+        const who = [r.first_name, r.last_name].filter(Boolean).join(" ") || r.email;
+        items.push({
+          id: `access-${r.id}`,
+          type: "access-request",
+          requestId: r.id,
+          fileKey: r.file_key,
+          permission: r.permission,
+          title: "Access request",
+          body: `${who} wants ${r.permission} access to "${r.file_name}"${r.message ? ` — “${r.message}”` : ""}`,
+          createdAt: r.created_at,
+        });
+      }
+
+      const answered = await pool.query(
+        `SELECT id, file_key, file_name, permission, status, decided_at
+         FROM access_requests
+         WHERE requester_id = $1 AND status <> 'pending' AND decided_at > now() - interval '30 days'
+         ORDER BY decided_at DESC
+         LIMIT 10`,
+        [userId]
+      );
+      for (const r of answered.rows) {
+        items.push({
+          id: `access-answer-${r.id}`,
+          type: r.status === "approved" ? "access-approved" : "access-denied",
+          fileKey: r.file_key,
+          title: r.status === "approved" ? "Access granted" : "Access denied",
+          body:
+            r.status === "approved"
+              ? `You now have ${r.permission} access to "${r.file_name}"`
+              : `Your request for "${r.file_name}" was declined`,
+          createdAt: r.decided_at,
+        });
+      }
+    } catch (e) {
+      // Table not created yet (first start) or other DB error: skip this block.
+      console.error("Notif access requests:", e.message);
+    }
+
     // Activité liée à moi (Super Admin / Manager : un peu plus large)
     try {
       const isAdmin =
@@ -71,8 +123,11 @@ router.get("/", async (req, res) => {
       console.error("Notif activity:", e.message);
     }
 
+    // Pending access requests first (they need an answer), then newest first.
     items.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      (a, b) =>
+        (b.type === "access-request") - (a.type === "access-request") ||
+        new Date(b.createdAt) - new Date(a.createdAt)
     );
 
     res.json({

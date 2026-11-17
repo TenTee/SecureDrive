@@ -16,12 +16,14 @@ import SystemSettings from "./pages/SystemSettings.jsx";
 import MyProfile from "./pages/MyProfile.jsx";
 import ForgotPassword from "./pages/ForgotPassword.jsx";
 import ResetPassword from "./pages/ResetPassword.jsx";
+import DocumentEditor from "./pages/DocumentEditor.jsx";
+import FileLink from "./pages/FileLink.jsx";
 import "./App.css";
 
 function FileLinkEntry() {
   const location = useLocation();
   const key = new URLSearchParams(location.search).get("key");
-  const target = key ? `/admin/shared-with-me?file=${encodeURIComponent(key)}` : "/login";
+  const target = key ? `/admin/open?key=${encodeURIComponent(key)}` : "/login";
   const token = localStorage.getItem("token");
 
   if (key && !token) localStorage.setItem("pendingFileLink", target);
@@ -38,10 +40,12 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/file" element={<FileLinkEntry />} />
+        <Route path="/editor" element={<DocumentEditor />} />
 
         <Route path="/admin" element={<AdminLayout />}>
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="files" element={<MyFiles />} />
+          <Route path="open" element={<FileLink />} />
           <Route path="shared-with-me" element={<SharedWithMe />} />
           <Route path="shared-by-me" element={<SharedFiles />} />
           <Route path="recent" element={<Recent />} />

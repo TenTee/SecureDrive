@@ -39,3 +39,22 @@ CREATE TABLE IF NOT EXISTS shares (
 CREATE INDEX IF NOT EXISTS idx_shares_shared_with ON shares(shared_with_id);
 CREATE INDEX IF NOT EXISTS idx_shares_owner ON shares(owner_id);
 CREATE INDEX IF NOT EXISTS idx_shares_file_key ON shares(file_key);
+
+-- Access requests sent from a file link by users who don't have access yet.
+-- (Also created automatically at backend start by files/access-requests.routes.js.)
+CREATE TABLE IF NOT EXISTS access_requests (
+  id           SERIAL PRIMARY KEY,
+  file_key     TEXT NOT NULL,
+  file_name    VARCHAR(255) NOT NULL,
+  owner_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission   VARCHAR(20) NOT NULL CHECK (permission IN ('Read Only', 'Read & Write')),
+  message      TEXT,
+  status       VARCHAR(20) NOT NULL DEFAULT 'pending'
+               CHECK (status IN ('pending', 'approved', 'denied')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_access_requests_pending
+  ON access_requests (file_key, requester_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_access_requests_owner ON access_requests (owner_id, status);

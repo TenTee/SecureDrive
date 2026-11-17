@@ -582,11 +582,12 @@ router.post("/trash", requireAuth, async (req, res) => {
 
     const isFolder = key.endsWith("/");
     const sourceKeys = isFolder ? await listAllKeys(s3, key) : [key];
+    let trashKey;
 
     if (isFolder) {
       await deleteKeys(s3, sourceKeys);
     } else {
-      const trashKey = key.replace(/^uploads\//, "trash/");
+      trashKey = key.replace(/^uploads\//, "trash/");
       await s3.send(
         new CopyObjectCommand({
           Bucket: BUCKET_NAME,

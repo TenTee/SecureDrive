@@ -27,6 +27,10 @@ body {
 .drop-upload-status { position: fixed; z-index: 10050; right: 24px; bottom: 24px; max-width: min(420px, calc(100vw - 48px)); padding: 13px 18px; border: 1px solid #c7d2fe; border-radius: 12px; background: #eef2ff; color: #3730a3; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16); font-size: 0.9rem; font-weight: 650; }
 .file-card-preview { display: flex; width: 100%; height: 142px; align-items: center; justify-content: center; border: 0; border-bottom: 1px solid #eef2f7; background: linear-gradient(135deg, #f8fafc, #eef2ff); cursor: pointer; }
 .file-card-thumbnail { width: 100%; height: 100%; object-fit: cover; }
+.file-card-openable { cursor: pointer; }
+.file-card-doc-preview { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; padding: 10px 18px 0; box-sizing: border-box; }
+.file-card-doc-thumbnail { display: block; border-radius: 4px 4px 0 0; background: #fff; object-position: top center; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
+.file-card-doc-badge { position: absolute; left: 8px; bottom: 6px; display: grid; place-items: center; padding: 2px; border-radius: 6px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15); }
 .file-card-details { padding: 12px 42px 13px 13px; }
 .file-card-name { overflow: hidden; color: #0f172a; font-size: 0.9rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-meta { margin-top: 5px; color: #64748b; font-size: 0.78rem; }

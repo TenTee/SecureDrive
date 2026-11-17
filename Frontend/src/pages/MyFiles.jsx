@@ -5,6 +5,7 @@ import { API_BASE } from "../config.js";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import FileCard from "../components/FileCard.jsx";
 import ActionModal from "../components/shared/ActionModal.jsx";
+import { isOfficeFile, openInEditor } from "../office.js";
 
 function formatSize(bytes) {
   if (bytes == null) return "—";
@@ -68,6 +69,9 @@ export default function MyFiles() {
   const [folderModal, setFolderModal] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [docModal, setDocModal] = useState(false);
+  const [docName, setDocName] = useState("");
+  const [docType, setDocType] = useState("docx");
   const [menu, setMenu] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
@@ -263,6 +267,41 @@ export default function MyFiles() {
     }
   }
 
+  async function handleCreateDocument(e) {
+    e.preventDefault();
+    setCreating(true);
+    // Open the tab now, during the click, so popup blockers allow it.
+    const editorTab = window.open("", "_blank");
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/office/new`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ type: docType, name: docName.trim(), parent: path }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        editorTab?.close();
+        showToast(data.error || "Could not create document", "error");
+        return;
+      }
+      setDocName("");
+      setDocModal(false);
+      showToast(`"${data.fileName}" created`);
+      load(path);
+      if (editorTab) editorTab.location.href = `/editor?key=${encodeURIComponent(data.fileKey)}`;
+      else openInEditor(data.fileKey);
+    } catch {
+      editorTab?.close();
+      showToast("Cannot connect to server", "error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function handleUploadHere(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -343,6 +382,10 @@ export default function MyFiles() {
 
   function handlePreview(file) {
     setMenu(null);
+    if (isOfficeFile(file.name)) {
+      openInEditor(file.key);
+      return;
+    }
     setPreviewModal({ key: file.key, name: file.name });
   }
 
@@ -868,6 +911,9 @@ export default function MyFiles() {
           >
             {t("uploadHere")}
           </button>
+          <button className="btn btn-outline" type="button" onClick={() => setDocModal(true)}>
+            + {t("newDocument")}
+          </button>
           <button className="btn btn-solid" type="button" onClick={() => setFolderModal(true)}>
             + {t("newFolder")}
           </button>
@@ -961,7 +1007,7 @@ export default function MyFiles() {
               />
             ))}
             {files.map((file) => (
-              <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} onOpen={handlePreview} onMenu={openMenu} />
+              <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} previewable={canPreview(file.name) || isOfficeFile(file.name)} onOpen={handlePreview} onMenu={openMenu} />
             ))}
           </div>
         )}
@@ -1001,6 +1047,11 @@ export default function MyFiles() {
             </>
           ) : (
             <>
+              {isOfficeFile(menu.item.name) && (
+                <button type="button" onClick={() => handlePreview(menu.item)}>
+                  {t("openInEditor")}
+                </button>
+              )}
               {canPreview(menu.item.name) && (
                 <button type="button" onClick={() => handlePreview(menu.item)}>
                   {t("preview")}
@@ -1065,6 +1116,52 @@ export default function MyFiles() {
                 className="btn btn-solid"
                 disabled={creating || !folderName.trim()}
               >
+                {creating ? t("creating") : t("create")}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {docModal && (
+        <Modal onClose={() => setDocModal(false)}>
+          <h3 style={{ margin: "0 0 6px", fontSize: "1.15rem" }}>{t("newDocument")}</h3>
+          <p style={{ margin: "0 0 16px", color: "#64748b", fontSize: "0.9rem" }}>
+            {t("newDocumentHint")}
+          </p>
+          <form onSubmit={handleCreateDocument}>
+            <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+              {[
+                ["docx", t("docTypeWord")],
+                ["xlsx", t("docTypeExcel")],
+                ["pptx", t("docTypePowerPoint")],
+              ].map(([value, label]) => (
+                <label key={value} style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="docType"
+                    value={value}
+                    checked={docType === value}
+                    onChange={() => setDocType(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <label style={{ fontSize: "0.85rem", fontWeight: 600 }}>{t("documentName")}</label>
+            <input
+              type="text"
+              value={docName}
+              onChange={(e) => setDocName(e.target.value)}
+              placeholder={`e.g. Report.${docType}`}
+              style={inputStyle}
+              autoFocus
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button type="button" className="btn btn-outline" onClick={() => setDocModal(false)}>
+                {t("cancel")}
+              </button>
+              <button type="submit" className="btn btn-solid" disabled={creating}>
                 {creating ? t("creating") : t("create")}
               </button>
             </div>

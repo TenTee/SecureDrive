@@ -10,6 +10,8 @@ import favoritesRoutes from "./files/favorites.routes.js";
 import searchRoutes from "./search/search.routes.js";
 import notificationsRoutes from "./notifications/notifications.routes.js";
 import dashboardRoutes from "./dashboard/dashboard.routes.js";
+import officeRoutes from "./office/office.routes.js";
+import accessRequestRoutes from "./files/access-requests.routes.js";
 
 const app = express();
 
@@ -17,6 +19,8 @@ app.use(
   cors({
     origin: true,
     credentials: true,
+    // Lets the browser read the renewed session token (sliding sessions).
+    exposedHeaders: ["X-Refresh-Token"],
   })
 );
 app.use(express.json());
@@ -40,5 +44,7 @@ app.use("/api/activity", activityRoutes);
 app.use("/api/favorites", favoritesRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/office", officeRoutes);
+app.use("/api/access-requests", accessRequestRoutes);
 
 export default app;

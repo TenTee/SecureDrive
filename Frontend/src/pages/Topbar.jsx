@@ -123,6 +123,36 @@ export default function Topbar({
     }
   }
 
+  // Load once on mount and every minute, so new access requests show in the badge.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadNotifications();
+    const interval = window.setInterval(loadNotifications, 60000);
+    return () => window.clearInterval(interval);
+     
+  }, []);
+
+  async function answerAccessRequest(notification, decision, permission) {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`${API_BASE}/api/access-requests/${notification.requestId}/${decision}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ permission }),
+      });
+      if (res.ok || res.status === 404) {
+        setNotifications((list) => list.filter((n) => n.id !== notification.id));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function openNotificationFile(notification) {
+    setShowNotifications(false);
+    navigate(`/admin/open?key=${encodeURIComponent(notification.fileKey)}`);
+  }
+
   function toggleNotifications(e) {
     e.stopPropagation();
     const next = !showNotifications;
@@ -343,6 +373,46 @@ export default function Topbar({
                     <div style={{ fontSize: "0.78rem", color: "var(--text-secondary)" }}>
                       {n.body}
                     </div>
+                    {n.type === "access-request" && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-solid"
+                          style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                          onClick={(e) => { e.stopPropagation(); answerAccessRequest(n, "approve", n.permission); }}
+                        >
+                          {t("approve")} ({n.permission === "Read & Write" ? t("readWrite") : t("readOnly")})
+                        </button>
+                        {n.permission === "Read & Write" && (
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                            onClick={(e) => { e.stopPropagation(); answerAccessRequest(n, "approve", "Read Only"); }}
+                          >
+                            {t("approve")} ({t("readOnly")})
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ padding: "4px 10px", fontSize: "0.75rem", color: "#ef4444" }}
+                          onClick={(e) => { e.stopPropagation(); answerAccessRequest(n, "deny"); }}
+                        >
+                          {t("deny")}
+                        </button>
+                      </div>
+                    )}
+                    {n.type === "access-approved" && (
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: "4px 10px", fontSize: "0.75rem", marginTop: 6 }}
+                        onClick={() => openNotificationFile(n)}
+                      >
+                        {t("openFile")}
+                      </button>
+                    )}
                     <div
                       style={{
                         fontSize: "0.7rem",

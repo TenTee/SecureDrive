@@ -1,7 +1,34 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../config.js";
+import { isOfficeFile } from "../office.js";
 
 export default function FilePreviewModal({ fileKey, fileName, onClose }) {
+  // Word / Excel / PowerPoint: read-only ONLYOFFICE viewer inside the modal.
+  if (isOfficeFile(fileName || fileKey)) {
+    return (
+      <div className="modal-overlay" onClick={onClose}>
+        <div
+          className="modal-card"
+          style={{ maxWidth: 1100, width: "94vw", height: "90vh", display: "flex", flexDirection: "column" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div className="modal-title" style={{ margin: 0, fontSize: "1.05rem" }}>{fileName || "Preview"}</div>
+            <button className="btn btn-outline" type="button" onClick={onClose}>Close</button>
+          </div>
+          <iframe
+            title={fileName}
+            src={`/editor?key=${encodeURIComponent(fileKey)}&view=1&embed=1`}
+            style={{ flex: 1, width: "100%", border: "1px solid var(--border, #e2e8f0)", borderRadius: 8 }}
+          />
+        </div>
+      </div>
+    );
+  }
+  return <MediaPreview fileKey={fileKey} fileName={fileName} onClose={onClose} />;
+}
+
+function MediaPreview({ fileKey, fileName, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");

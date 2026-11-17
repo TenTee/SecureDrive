@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "../config.js";
+import { isOfficeFile } from "../office.js";
 
 const FILE_TYPES = {
   pdf: { label: "PDF", color: "#dc2626", path: "M6 3h8l4 4v14H6z M14 3v5h4 M8 13h8 M8 17h6" },
@@ -28,17 +29,20 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
   const isMedia = !folder && (item.type === "image" || item.type === "video");
+  // Word / Excel / PowerPoint / PDF: first-page thumbnail rendered by ONLYOFFICE.
+  const isDocument = !folder && (item.type === "pdf" || isOfficeFile(item.name));
 
   useEffect(() => {
     let cancelled = false;
-    if (!isMedia) return undefined;
+    if (!isMedia && !isDocument) return undefined;
 
     async function loadThumbnail() {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch(`${API_BASE}/api/files/preview?key=${encodeURIComponent(item.key)}`, { headers: { Authorization: `Bearer ${token}` } });
+        const endpoint = isDocument ? "/api/office/thumbnail" : "/api/files/preview";
+        const res = await fetch(`${API_BASE}${endpoint}?key=${encodeURIComponent(item.key)}`, { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
-        if (!cancelled && res.ok) setPreviewUrl(data.previewUrl || "");
+        if (!cancelled && res.ok) setPreviewUrl(data.thumbnailUrl || data.previewUrl || "");
       } catch {
         // Keep the type icon when a thumbnail cannot load.
       }
@@ -46,11 +50,17 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
 
     loadThumbnail();
     return () => { cancelled = true; };
-  }, [isMedia, item.key]);
+  }, [isMedia, isDocument, item.key]);
 
   function handleOpen() {
     if (folder) onOpen?.(item.key);
     else if (previewable) onOpen?.(item);
+  }
+
+  // A click anywhere on the card opens it, except on the ⋮ menu and action buttons.
+  function handleCardClick(event) {
+    if (event.target.closest("[data-menu-btn], .file-card-actions")) return;
+    handleOpen();
   }
 
   function handleDragEnter(event) {
@@ -86,16 +96,21 @@ export default function FileCard({ item, folder = false, favorite = false, onOpe
 
   return (
     <article
-      className={`file-card${dragActive ? " file-card-drop-target" : ""}`}
-      onDoubleClick={handleOpen}
+      className={`file-card${dragActive ? " file-card-drop-target" : ""}${folder || previewable ? " file-card-openable" : ""}`}
+      onClick={handleCardClick}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {dragActive && <div className="file-card-drop-hint" aria-hidden="true">{dropHint}</div>}
-      <button className="file-card-preview" type="button" onClick={handleOpen} aria-label={folder ? `Open ${item.name}` : `Preview ${item.name}`}>
-        {previewUrl && item.type === "image" ? <img src={previewUrl} alt="" className="file-card-thumbnail" /> : previewUrl && item.type === "video" ? <video src={previewUrl} className="file-card-thumbnail" muted preload="metadata" /> : <TypeIcon type={item.type} folder={folder} />}
+      <button className="file-card-preview" type="button" aria-label={folder ? `Open ${item.name}` : `Preview ${item.name}`}>
+        {previewUrl && isDocument ? (
+          <span className="file-card-doc-preview">
+            <img src={previewUrl} alt="" className="file-card-thumbnail file-card-doc-thumbnail" onError={() => setPreviewUrl("")} />
+            <span className="file-card-doc-badge"><TypeIcon type={item.type} size={26} /></span>
+          </span>
+        ) : previewUrl && item.type === "image" ? <img src={previewUrl} alt="" className="file-card-thumbnail" /> : previewUrl && item.type === "video" ? <video src={previewUrl} className="file-card-thumbnail" muted preload="metadata" /> : <TypeIcon type={item.type} folder={folder} />}
       </button>
       <div className="file-card-details">
         <div className="file-card-name" title={item.name}>

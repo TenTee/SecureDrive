@@ -1,0 +1,37 @@
+# ONLYOFFICE Document Server: online editing + real-time co-editing of
+# Word / Excel / PowerPoint files for SecureDrive.
+#
+#   docker compose up -d onlyoffice
+#
+# The editor UI is then served from http://localhost:8080 (VITE_ONLYOFFICE_URL)
+# and calls the backend back on http://host.docker.internal:4000
+# (ONLYOFFICE_BACKEND_URL) to save documents.
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: securedrive-onlyoffice
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      JWT_ENABLED: "true"
+      # Must be the same value as ONLYOFFICE_JWT_SECRET in Backend/.env
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-change-me-onlyoffice-secret}
+      # NOT "Authorization": the Document Server adds this header when it
+      # downloads the file, and S3 rejects a presigned URL that also carries an
+      # Authorization header ("Only one auth mechanism allowed" -> 400).
+      JWT_HEADER: AuthorizationJwt
+      JWT_IN_BODY: "true"
+      # Dev only: lets the Document Server call the backend on a private
+      # address (host.docker.internal). Remove in production where the
+      # backend has a public HTTPS URL.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+
+volumes:
+  onlyoffice_data:
+  onlyoffice_logs:

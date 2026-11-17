@@ -5,6 +5,8 @@ import { API_BASE } from "../config.js";
 import FileCard from "../components/FileCard.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import ActionModal from "../components/shared/ActionModal.jsx";
+import NewDocumentModal from "../components/NewDocumentModal.jsx";
+import { isOfficeFile, openInEditor } from "../office.js";
 
 function cleanName(key) {
   const raw = (key || "").split("/").filter(Boolean).pop() || key || "file";
@@ -32,6 +34,7 @@ export default function SharedWithMe() {
   const [folderModal, setFolderModal] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [docModal, setDocModal] = useState(false);
   const fileInputRef = useRef(null);
   const uploadInputRef = useRef(null);
   const pendingReplaceRef = useRef(null);
@@ -448,6 +451,11 @@ export default function SharedWithMe() {
     openSharedFolder({ file_key: item.key, file_name: item.name, permission: menu?.permission || browsePerm });
   }
 
+  function openFile(file) {
+    if (isOfficeFile(file.name)) openInEditor(file.key);
+    else setPreviewModal({ key: file.key, name: file.name });
+  }
+
   function renderMenu() {
     if (!menu) return null;
     const item = menu.item;
@@ -463,6 +471,7 @@ export default function SharedWithMe() {
           </>
         ) : (
           <>
+            {isOfficeFile(item.name) && <button type="button" onClick={() => { setMenu(null); openInEditor(item.key); }}>{t("openInEditor")}</button>}
             {canPreview && <button type="button" onClick={() => { setMenu(null); setPreviewModal({ key: item.key, name: item.name }); }}>{t("preview")}</button>}
             <button type="button" onClick={() => { setMenu(null); handleDownload(item.key, item.name); }}>{t("download")}</button>
             <button type="button" onClick={() => { setMenu(null); copyFileLink(item.key); }}>{t("copyLink")}</button>
@@ -546,6 +555,9 @@ export default function SharedWithMe() {
             >
               {t("uploadHere")}
             </button>
+            <button type="button" className="btn btn-outline" onClick={() => setDocModal(true)}>
+              + {t("newDocument")}
+            </button>
             <button type="button" className="btn btn-solid" onClick={() => setFolderModal(true)}>
               + {t("newFolder")}
             </button>
@@ -610,7 +622,7 @@ export default function SharedWithMe() {
                   item={{ key: file.key, name: file.name, type: file.type, permission: file.permission, sizeLabel: formatSize(file.size) }}
                   onMenu={(event, item) => openMenu(event, { ...item, permission: file.permission || browsePerm }, false)}
                   previewable={file.type !== "file"}
-                  onOpen={(selected) => setPreviewModal({ key: selected.key, name: selected.name })}
+                  onOpen={(selected) => openFile(selected)}
                 />
               ))}
             </div>
@@ -621,6 +633,13 @@ export default function SharedWithMe() {
         {renderMenu()}
         {previewModal && <FilePreviewModal fileKey={previewModal.key} fileName={previewModal.name} onClose={() => setPreviewModal(null)} />}
         {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
+        {docModal && (
+          <NewDocumentModal
+            parent={browsePath}
+            onClose={() => setDocModal(false)}
+            onCreated={() => openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm })}
+          />
+        )}
         {folderModal && (
           <div className="modal-overlay" onClick={() => !creatingFolder && setFolderModal(false)}>
             <form className="modal-card" onClick={(event) => event.stopPropagation()} onSubmit={createSharedFolder}>
@@ -686,7 +705,7 @@ export default function SharedWithMe() {
               item={{ ...directFile, sizeLabel: formatSize(directFile.size) }}
               onMenu={(event, item) => openMenu(event, item, false)}
               previewable={directFile.type !== "file"}
-              onOpen={(file) => setPreviewModal({ key: file.key, name: file.name })}
+              onOpen={(file) => openFile(file)}
             />
           </div>
         </div>
@@ -708,7 +727,7 @@ export default function SharedWithMe() {
               {shares.map((item) => {
                 const folder = isFolderShare(item);
                 const type = guessType(item.file_name);
-                return <FileCard key={item.id} item={{ key: item.file_key, name: item.file_name, type, permission: item.permission, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} onMenu={(event, cardItem, isFolder) => openMenu(event, { ...cardItem, permission: item.permission }, isFolder)} previewable={!folder && type !== "file"} onOpen={(file) => folder ? openSharedFolder(item) : setPreviewModal({ key: file.key, name: file.name })} meta={`${item.owner_first_name || ""} ${item.owner_last_name || ""}`.trim() || item.owner_email} dropHint={t("dropFilesIntoFolder")} onFileDrop={folder && item.permission === "Read & Write" ? (droppedFiles) => uploadDroppedFiles(droppedFiles, item.file_key) : undefined} />;
+                return <FileCard key={item.id} item={{ key: item.file_key, name: item.file_name, type, permission: item.permission, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} onMenu={(event, cardItem, isFolder) => openMenu(event, { ...cardItem, permission: item.permission }, isFolder)} previewable={!folder && type !== "file"} onOpen={(file) => folder ? openSharedFolder(item) : openFile(file)} meta={`${item.owner_first_name || ""} ${item.owner_last_name || ""}`.trim() || item.owner_email} dropHint={t("dropFilesIntoFolder")} onFileDrop={folder && item.permission === "Read & Write" ? (droppedFiles) => uploadDroppedFiles(droppedFiles, item.file_key) : undefined} />;
               })}
           </div>
         )}

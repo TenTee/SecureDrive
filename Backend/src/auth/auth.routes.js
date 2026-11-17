@@ -1,9 +1,8 @@
 import { Router } from "express";
 import crypto from "crypto";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import { pool } from "../db/pool.js";
-import { requireAuth } from "../middleware/auth.middleware.js";
+import { requireAuth, signSessionToken } from "../middleware/auth.middleware.js";
 import { logActivity } from "../activity/activity.routes.js";
 import { sendPasswordResetCode } from "../services/email.service.js";
 
@@ -43,15 +42,8 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "8h" }
-    );
+    // Sliding 30-day session (renewed by requireAuth while the user is active).
+    const token = signSessionToken({ userId: user.id, email: user.email, role: user.role });
 
     await logActivity({
       userId: user.id,
