@@ -16,7 +16,7 @@ services:
     environment:
       JWT_ENABLED: "true"
       # Must be the same value as ONLYOFFICE_JWT_SECRET in Backend/.env
-      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:4a34e110674ea9661634bee0dd96e4078d10f9ef39af8de8184620bd166834e5}
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
       # NOT "Authorization": the Document Server adds this header when it
       # downloads the file, and S3 rejects a presigned URL that also carries an
       # Authorization header ("Only one auth mechanism allowed" -> 400).
