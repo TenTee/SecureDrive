@@ -6,6 +6,7 @@ import FileCard from "../components/FileCard.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import ActionModal from "../components/shared/ActionModal.jsx";
 import NewDocumentModal from "../components/NewDocumentModal.jsx";
+import Breadcrumb from "../components/Breadcrumb.jsx";
 import { isOfficeFile, openInEditor } from "../office.js";
 
 function cleanName(key) {
@@ -44,6 +45,8 @@ export default function SharedWithMe() {
 
   const [browsePath, setBrowsePath] = useState(null);
   const [browseName, setBrowseName] = useState("");
+  // The shared folder the user entered from: start of the breadcrumb.
+  const [shareRoot, setShareRoot] = useState(null);
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderFolders, setFolderFolders] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -93,6 +96,25 @@ export default function SharedWithMe() {
 
   useEffect(() => () => uploadRequestRef.current?.abort(), []);
 
+  // Sidebar "+ New" menu: inside a shared folder with write access, create / upload here.
+  // Otherwise the event is left unhandled and the menu falls back to My Files.
+  useEffect(() => {
+    if (!browsePath || browsePerm !== "Read & Write") return undefined;
+    function onNew(event) {
+      const action = event.detail?.action;
+      event.preventDefault();
+      if (action === "folder") setFolderModal(true);
+      else if (action === "upload") {
+        if (uploadInputRef.current) {
+          uploadInputRef.current.value = "";
+          uploadInputRef.current.click();
+        }
+      } else if (["docx", "xlsx", "pptx"].includes(action)) setDocModal(action);
+    }
+    window.addEventListener("sd-new", onNew);
+    return () => window.removeEventListener("sd-new", onNew);
+  }, [browsePath, browsePerm]);
+
   async function loadShares() {
     setLoading(true);
     setError("");
@@ -138,6 +160,11 @@ export default function SharedWithMe() {
   async function openSharedFolder(item) {
     const path = item.file_key.endsWith("/") ? item.file_key : item.file_key + "/";
     const requestId = ++browseRequestRef.current;
+    setShareRoot((root) =>
+      root && path.startsWith(root.key)
+        ? root
+        : { key: path, name: item.file_name || cleanName(path), permission: item.permission || "Read Only" }
+    );
     setBrowsePath(path);
     setBrowseName(item.file_name || cleanName(path));
     setBrowsePerm(item.permission || "Read Only");
@@ -312,7 +339,33 @@ export default function SharedWithMe() {
   }
 
   function backToShares() {
-    window.location.replace(`${window.location.origin}/admin/shared-with-me`);
+    if (directKey) {
+      // Opened from a ?file= link: reload without it.
+      window.location.replace(`${window.location.origin}/admin/shared-with-me`);
+      return;
+    }
+    browseRequestRef.current += 1; // ignore a folder still loading
+    setBrowsePath(null);
+    setShareRoot(null);
+    setMenu(null);
+    loadShares();
+  }
+
+  // "Shared with me › Shared folder › sub › sub" — each part opens that folder.
+  function breadcrumbItems() {
+    const items = [{ label: t("sharedWithMe"), onClick: backToShares }];
+    if (!shareRoot || !browsePath?.startsWith(shareRoot.key)) {
+      items.push({ label: browseName });
+      return items;
+    }
+    const open = (key, name) => openSharedFolder({ file_key: key, file_name: name, permission: shareRoot.permission });
+    items.push({ label: shareRoot.name, onClick: () => open(shareRoot.key, shareRoot.name) });
+    const parts = browsePath.slice(shareRoot.key.length).split("/").filter(Boolean);
+    parts.forEach((part, i) => {
+      const key = `${shareRoot.key}${parts.slice(0, i + 1).join("/")}/`;
+      items.push({ label: part, onClick: () => open(key, part) });
+    });
+    return items;
   }
 
   async function handleDownload(fileKey, fileName) {
@@ -541,36 +594,13 @@ export default function SharedWithMe() {
   if (browsePath) {
     return (
       <div>
-        <h2 className="page-heading">📁 {browseName}</h2>
+        <h2 className="page-heading">{browseName}</h2>
         <p className="page-subtext">
           {t("sharedFolderLabel")} · {permLabel(browsePerm)}
         </p>
-        {browsePerm === "Read & Write" && (
-          <div className="myfiles-actions" style={{ marginBottom: 16 }}>
-            <input ref={uploadInputRef} type="file" hidden onChange={uploadToSharedFolder} />
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => uploadInputRef.current?.click()}
-            >
-              {t("uploadHere")}
-            </button>
-            <button type="button" className="btn btn-outline" onClick={() => setDocModal(true)}>
-              + {t("newDocument")}
-            </button>
-            <button type="button" className="btn btn-solid" onClick={() => setFolderModal(true)}>
-              + {t("newFolder")}
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          className="btn btn-outline"
-          style={{ marginBottom: 16 }}
-          onClick={backToShares}
-        >
-          ← {t("backToShared")}
-        </button>
+        {/* Upload / new folder / new document come from the sidebar "+ New" menu. */}
+        <input ref={uploadInputRef} type="file" hidden onChange={uploadToSharedFolder} />
+        <Breadcrumb items={breadcrumbItems()} />
 
         {error && <div style={{ color: "#ef4444", marginBottom: 12 }}>{error}</div>}
 
@@ -602,7 +632,9 @@ export default function SharedWithMe() {
               <div className="empty-state-title">{t("emptyFolder")}</div>
             </div>
           ) : (
-            <div className="file-card-grid">
+            <>
+            {folderFolders.length > 0 && <div className="file-section-title">{t("foldersSection")}</div>}
+            <div className="file-card-grid folder-grid">
               {folderFolders.map((folder) => (
                 <FileCard
                   key={folder.key}
@@ -616,6 +648,9 @@ export default function SharedWithMe() {
                     : undefined}
                 />
               ))}
+            </div>
+            {folderFiles.length > 0 && <div className="file-section-title">{t("filesSection")}</div>}
+            <div className="file-card-grid">
               {folderFiles.map((file) => (
                 <FileCard
                   key={file.key}
@@ -626,6 +661,7 @@ export default function SharedWithMe() {
                 />
               ))}
             </div>
+            </>
           )}
         </div>
 
@@ -636,6 +672,7 @@ export default function SharedWithMe() {
         {docModal && (
           <NewDocumentModal
             parent={browsePath}
+            initialType={docModal}
             onClose={() => setDocModal(false)}
             onCreated={() => openSharedFolder({ file_key: browsePath, file_name: browseName, permission: browsePerm })}
           />

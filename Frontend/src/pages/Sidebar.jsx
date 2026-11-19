@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ROLES } from "../data/mockData.js";
 import { t } from "../i18n.js";
+import NewMenu from "../components/NewMenu.jsx";
 
 const FILE_NAV = [
   { to: "dashboard", labelKey: "dashboard", icon: GridIcon },
@@ -34,7 +35,13 @@ const ADMIN_NAV = [
   },
 ];
 
-export default function Sidebar({ user, onNavigate }) {
+function formatBytes(bytes = 0) {
+  if (bytes < 1024 * 1024) return `${Math.max(0, bytes / 1024).toFixed(0)} Ko`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} Mo`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} Go`;
+}
+
+export default function Sidebar({ user, onNavigate, uploadFile }) {
   const navigate = useNavigate();
   const [, setTick] = useState(0);
 
@@ -62,7 +69,8 @@ export default function Sidebar({ user, onNavigate }) {
         </div>
       </div>
 
-      <div className="sidebar-section-label">{t("navigation")}</div>
+      <NewMenu user={user} uploadFile={uploadFile} onAction={handleNav} />
+
       <nav className="sidebar-nav">
         {FILE_NAV.map((item) => (
           <NavLink
@@ -96,6 +104,11 @@ export default function Sidebar({ user, onNavigate }) {
 
       <div className="sidebar-spacer" />
 
+      <div className="sidebar-storage">
+        <CloudIcon />
+        <span>{t("storageUsedLabel").replace("{size}", formatBytes(user.storageUsedBytes))}</span>
+      </div>
+
       <div className="sidebar-bottom">
         <div
           className="sidebar-user-card"
@@ -117,6 +130,13 @@ export default function Sidebar({ user, onNavigate }) {
   );
 }
 
+function CloudIcon() {
+  return (
+    <svg {...iconProps()}>
+      <path d="M7 18a4.5 4.5 0 01-.6-8.96A6 6 0 0118 8.5a4.75 4.75 0 01-.5 9.5z" />
+    </svg>
+  );
+}
 function ShieldIcon() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2">

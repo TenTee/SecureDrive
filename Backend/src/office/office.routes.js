@@ -2,7 +2,8 @@
 //
 //   GET  /api/office/config?key=   -> signed editor config for one file
 //   POST /api/office/callback      -> called by the Document Server to save
-//   POST /api/office/new           -> create a blank docx / xlsx / pptx
+//   POST /api/office/new           -> create a blank docx / xlsx / pptx (as a draft:
+//                                     it reaches the folder only once edited)
 //
 // Flow: the browser asks for /config, loads the editor with it, the Document
 // Server downloads the file through a short-lived presigned S3 URL, users edit
@@ -15,7 +16,13 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import jwt from "jsonwebtoken";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { requireAuth } from "../middleware/auth.middleware.js";
 import { pool } from "../db/pool.js";
@@ -69,6 +76,53 @@ function documentTypeFor(ext) {
   return Object.keys(DOCUMENT_TYPES).find((type) => DOCUMENT_TYPES[type].includes(ext)) || null;
 }
 
+/** drafts/<userId>/... -> { userId } for a new document that was never saved. */
+function parseDraftKey(fileKey) {
+  const match = /^drafts\/(\d+)\//.exec(fileKey);
+  return match ? { userId: Number(match[1]) } : null;
+}
+
+async function objectExists(s3, key) {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deleteQuietly(s3, key) {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+  } catch (err) {
+    console.error("Draft delete failed:", key, err.message);
+  }
+}
+
+// Drafts whose editor never reported back (browser crash, server restart…).
+const DRAFT_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+async function cleanupStaleDrafts() {
+  try {
+    const s3 = await getTemporaryS3Client("draft-cleanup");
+    let ContinuationToken;
+    do {
+      const page = await s3.send(
+        new ListObjectsV2Command({ Bucket: BUCKET_NAME, Prefix: "drafts/", ContinuationToken })
+      );
+      for (const object of page.Contents || []) {
+        if (Date.now() - new Date(object.LastModified).getTime() > DRAFT_MAX_AGE_MS) {
+          await deleteQuietly(s3, object.Key);
+        }
+      }
+      ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+  } catch (err) {
+    console.error("Draft cleanup failed:", err.message);
+  }
+}
+setTimeout(cleanupStaleDrafts, 60 * 1000).unref();
+setInterval(cleanupStaleDrafts, 6 * 60 * 60 * 1000).unref();
+
 /** Same file + same version => same key, so everyone joins the same co-editing session. */
 function documentKey(fileKey, etag) {
   return crypto.createHash("sha256").update(`${fileKey}:${etag}`).digest("hex").slice(0, 40);
@@ -80,7 +134,12 @@ router.get("/config", requireAuth, async (req, res) => {
     const fileKey = req.query.key;
     if (!fileKey || fileKey.endsWith("/")) return res.status(400).json({ error: "Missing key" });
 
-    const permission = await getKeyPermission(fileKey, req.user);
+    // A new, never-edited document lives in drafts/<creatorId>/ (see POST /new):
+    // only its creator can open it.
+    const draft = parseDraftKey(fileKey);
+    const permission = draft
+      ? draft.userId === req.user.userId ? "Read & Write" : null
+      : await getKeyPermission(fileKey, req.user);
     if (!permission) return res.status(403).json({ error: "You don't have access to this file." });
 
     const title = displayName(fileKey);
@@ -91,7 +150,24 @@ router.get("/config", requireAuth, async (req, res) => {
     }
 
     const s3 = await getTemporaryS3Client(`user-${req.user.userId}`);
-    const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: fileKey }));
+    let head;
+    try {
+      head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: fileKey }));
+    } catch (err) {
+      if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
+        return res.status(404).json({ error: "This file no longer exists." });
+      }
+      throw err;
+    }
+
+    // Draft: where the document goes on its first save.
+    let targetKey = null;
+    if (draft) {
+      targetKey = decodeURIComponent(head.Metadata?.["target-key"] || "");
+      if (!targetKey || !(await canAccessKey(targetKey, req.user, { needWrite: true }))) {
+        return res.status(403).json({ error: "You can no longer write to the destination folder." });
+      }
+    }
     // The Document Server downloads the file itself, from the presigned URL.
     const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET_NAME, Key: fileKey }), {
       expiresIn: 900,
@@ -112,7 +188,7 @@ router.get("/config", requireAuth, async (req, res) => {
 
     // Callback URL carries a token bound to this exact file key, so a forged
     // callback cannot overwrite another file.
-    const callbackToken = jwt.sign({ fileKey, purpose: "onlyoffice-callback" }, process.env.JWT_SECRET, {
+    const callbackToken = jwt.sign({ fileKey, targetKey, purpose: "onlyoffice-callback" }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
     const backendUrl = (process.env.ONLYOFFICE_BACKEND_URL || "http://host.docker.internal:4000").replace(/\/$/, "");
@@ -248,10 +324,12 @@ router.get("/thumbnail", requireAuth, async (req, res) => {
 router.post("/callback", async (req, res) => {
   try {
     let fileKey;
+    let targetKey = null; // set for a new document still in drafts/
     try {
       const decoded = jwt.verify(String(req.query.t || ""), process.env.JWT_SECRET);
       if (decoded.purpose !== "onlyoffice-callback") throw new Error("bad purpose");
       fileKey = decoded.fileKey;
+      targetKey = decoded.targetKey || null;
     } catch {
       return res.status(403).json({ error: 1 });
     }
@@ -271,31 +349,43 @@ router.post("/callback", async (req, res) => {
       return res.status(403).json({ error: 1 });
     }
 
-    // 2 = ready for saving (all editors closed), 6 = force save while editing.
+    // 2 = ready for saving (all editors closed, document changed),
+    // 6 = force save while editing. Both only happen after a change.
     if (body.status === 2 || body.status === 6) {
       const response = await fetch(body.url);
       if (!response.ok) throw new Error(`Download from Document Server failed (${response.status})`);
       const buffer = Buffer.from(await response.arrayBuffer());
 
       const s3 = await getTemporaryS3Client("onlyoffice-save");
+      // A draft is saved into its real folder: that is when the new file appears.
+      const saveKey = targetKey || fileKey;
+      const isNew = Boolean(targetKey) && !(await objectExists(s3, saveKey));
       await s3.send(
         new PutObjectCommand({
           Bucket: BUCKET_NAME,
-          Key: fileKey,
+          Key: saveKey,
           Body: buffer,
-          ContentType: MIME[extOf(fileKey)] || "application/octet-stream",
+          ContentType: MIME[extOf(saveKey)] || "application/octet-stream",
           ServerSideEncryption: "AES256",
         })
       );
+      // Everyone has left: the draft copy is no longer needed.
+      if (targetKey && body.status === 2) await deleteQuietly(s3, fileKey);
 
       const editors = Array.isArray(body.users) ? body.users : [];
       for (const id of editors.length ? editors : [null]) {
         await logActivity({
           userId: id ? Number(id) || null : null,
-          action: "Edited a document online",
-          detail: displayName(fileKey),
+          action: isNew ? "Created a document" : "Edited a document online",
+          detail: displayName(saveKey),
         });
       }
+    }
+
+    // 4 = closed with no changes: a new document nobody typed in is dropped.
+    if (body.status === 4 && targetKey) {
+      const s3 = await getTemporaryS3Client("onlyoffice-save");
+      await deleteQuietly(s3, fileKey);
     }
 
     res.json({ error: 0 });
@@ -326,7 +416,12 @@ router.post("/new", requireAuth, async (req, res) => {
     let base = String(req.body.name || "").trim().replace(/\.(docx|xlsx|pptx)$/i, "");
     if (!base) base = { docx: "Document", xlsx: "Spreadsheet", pptx: "Presentation" }[type];
     const fileName = `${base.replace(/[^a-zA-Z0-9._-]/g, "_")}.${type}`;
-    const fileKey = `${parent}${crypto.randomUUID()}-${fileName}`;
+    const id = crypto.randomUUID();
+    // The blank file goes to a hidden draft. It only lands in `parent` (and in
+    // the file list) on its first save, i.e. once someone has edited it; if the
+    // editor is closed untouched, the draft is deleted (see /callback).
+    const targetKey = `${parent}${id}-${fileName}`;
+    const fileKey = `drafts/${userId}/${id}-${fileName}`;
 
     const body = await fs.readFile(path.join(TEMPLATES_DIR, `blank.${type}`));
     const s3 = await getTemporaryS3Client(`user-${userId}`);
@@ -336,18 +431,12 @@ router.post("/new", requireAuth, async (req, res) => {
         Key: fileKey,
         Body: body,
         ContentType: MIME[type],
+        Metadata: { "target-key": encodeURIComponent(targetKey) },
         ServerSideEncryption: "AES256",
       })
     );
 
-    await logActivity({
-      userId,
-      userName: req.user.email,
-      action: "Created a document",
-      detail: fileName,
-    });
-
-    res.status(201).json({ fileKey, fileName });
+    res.status(201).json({ fileKey, fileName, draft: true });
   } catch (err) {
     console.error("Create document error:", err.message);
     res.status(500).json({ error: "Could not create the document.", details: err.message });

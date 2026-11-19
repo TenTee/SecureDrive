@@ -17,32 +17,39 @@ body {
   background: #f8fafc;
 }
 
-.file-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; padding: 18px; }
-.file-card { position: relative; min-width: 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
-.file-card:hover { transform: translateY(-2px); border-color: #cbd5e1; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1); }
-.file-card.file-card-drop-target { border: 2px dashed #6366f1; background: #eef2ff; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12); transform: translateY(-2px); }
-.file-card-drop-hint { position: absolute; z-index: 2; inset: 8px; display: grid; place-items: center; padding: 10px; border-radius: 9px; background: rgba(79, 70, 229, 0.92); color: #fff; text-align: center; font-size: 0.88rem; font-weight: 700; pointer-events: none; }
-.files-drop-active { position: relative; outline: 2px dashed #6366f1; outline-offset: -8px; background: #f5f6ff; }
-.files-drop-hint { position: absolute; z-index: 5; inset: 8px; display: grid; place-items: center; border-radius: 12px; background: rgba(79, 70, 229, 0.12); color: #4338ca; font-weight: 750; font-size: 1rem; pointer-events: none; }
-.drop-upload-status { position: fixed; z-index: 10050; right: 24px; bottom: 24px; max-width: min(420px, calc(100vw - 48px)); padding: 13px 18px; border: 1px solid #c7d2fe; border-radius: 12px; background: #eef2ff; color: #3730a3; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16); font-size: 0.9rem; font-weight: 650; }
-.file-card-preview { display: flex; width: 100%; height: 142px; align-items: center; justify-content: center; border: 0; border-bottom: 1px solid #eef2f7; background: linear-gradient(135deg, #f8fafc, #eef2ff); cursor: pointer; }
-.file-card-thumbnail { width: 100%; height: 100%; object-fit: cover; }
-.file-card-openable { cursor: pointer; }
-.file-card-doc-preview { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; padding: 10px 18px 0; box-sizing: border-box; }
-.file-card-doc-thumbnail { display: block; border-radius: 4px 4px 0 0; background: #fff; object-position: top center; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
-.file-card-doc-badge { position: absolute; left: 8px; bottom: 6px; display: grid; place-items: center; padding: 2px; border-radius: 6px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15); }
-.file-card-details { padding: 12px 42px 13px 13px; }
-.file-card-name { overflow: hidden; color: #0f172a; font-size: 0.9rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.file-card-meta { margin-top: 5px; color: #64748b; font-size: 0.78rem; }
+/* ---------- File cards (Drive-style: name on top, preview below) ---------- */
+.file-section-title { margin: 18px 0 12px; color: var(--text-primary, #1f1f1f); font-size: 0.9rem; font-weight: 600; }
+.file-section-title:first-child { margin-top: 4px; }
+.file-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; padding: 0 0 8px; }
+.file-card-grid:empty { display: none; }
+.file-card-grid.folder-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.file-card { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0 8px 10px; border: 0; border-radius: 12px; background: var(--card-bg, #f0f4f9); transition: background 120ms ease, box-shadow 120ms ease; }
+.file-card:hover { background: var(--card-hover, #e1e5ea); }
+.file-card-compact { padding: 0 4px 0 8px; }
+.file-card.file-card-drop-target { outline: 2px dashed var(--accent, #0b57d0); background: var(--nav-active, #c2e7ff); }
+.file-card-drop-hint { position: absolute; z-index: 2; inset: 6px; display: grid; place-items: center; padding: 8px; border-radius: 9px; background: rgba(11, 87, 208, 0.92); color: #fff; text-align: center; font-size: 0.84rem; font-weight: 700; pointer-events: none; }
+.files-drop-active { position: relative; outline: 2px dashed var(--accent, #0b57d0); outline-offset: -8px; }
+.files-drop-hint { position: absolute; z-index: 5; inset: 8px; display: grid; place-items: center; border-radius: 12px; background: rgba(11, 87, 208, 0.1); color: var(--accent, #0b57d0); font-weight: 700; font-size: 1rem; pointer-events: none; }
+.drop-upload-status { position: fixed; z-index: 10050; right: 24px; bottom: 24px; max-width: min(420px, calc(100vw - 48px)); padding: 13px 18px; border-radius: 12px; background: #1f1f1f; color: #fff; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2); font-size: 0.9rem; font-weight: 600; }
+.file-card-head { display: flex; align-items: center; gap: 12px; min-height: 48px; padding-left: 6px; }
+.file-card-type-icon { flex: 0 0 auto; }
+.file-card-folder-icon { color: var(--folder-color, #444746); }
+.file-card-name { flex: 1; min-width: 0; overflow: hidden; color: var(--text-primary, #1f1f1f); font-size: 0.875rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-favorite { margin-right: 5px; color: #f59e0b; }
-.file-card-menu { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.92); color: #475569; cursor: pointer; font-size: 18px; line-height: 1; padding: 6px 9px; }
-.file-card-menu:hover { background: #fff; color: #0f172a; }
-.file-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.file-card-actions .btn { padding: 5px 8px; font-size: 0.76rem; }
-.menu-floating { position: fixed; z-index: 10050; min-width: 200px; padding: 6px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18); text-align: left; }
-.menu-floating button { display: block; width: 100%; padding: 11px 14px; border: 0; border-radius: 8px; background: transparent; color: #0f172a; cursor: pointer; font-size: 0.9rem; text-align: left; }
-.menu-floating button:hover { background: #f1f5f9; }
-@media (max-width: 768px) { .file-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 10px; } .file-card-preview { height: 112px; } }
+.file-card-menu { flex: 0 0 auto; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary, #444746); cursor: pointer; font-size: 18px; line-height: 1; }
+.file-card-menu:hover { background: rgba(68, 71, 70, 0.12); color: var(--text-primary, #1f1f1f); }
+.file-card-preview { display: flex; width: 100%; height: 160px; padding: 0; align-items: center; justify-content: center; overflow: hidden; border: 0; border-radius: 8px; background: var(--bg-surface, #fff); cursor: pointer; }
+.file-card-thumbnail { width: 100%; height: 100%; object-fit: cover; }
+.file-card-doc-thumbnail { object-position: top center; }
+.file-card-openable { cursor: pointer; }
+.file-card-meta { overflow: hidden; padding: 8px 4px 0; color: var(--text-secondary, #444746); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.file-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 0; }
+.file-card-actions .btn { padding: 5px 10px; font-size: 0.76rem; border-radius: 999px; }
+.menu-floating { position: fixed; z-index: 10050; min-width: 220px; padding: 8px 0; border: 0; border-radius: 8px; background: var(--bg-surface, #fff); box-shadow: 0 2px 6px 2px rgba(60, 64, 67, 0.15), 0 1px 2px rgba(60, 64, 67, 0.3); text-align: left; }
+.menu-floating button { display: block; width: 100%; padding: 9px 20px; border: 0; border-radius: 0; background: transparent; color: var(--text-primary, #1f1f1f); cursor: pointer; font-size: 0.875rem; text-align: left; }
+.menu-floating button:hover { background: rgba(68, 71, 70, 0.08); }
+.menu-floating button.danger { color: #b3261e; }
+@media (max-width: 768px) { .file-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .file-card-grid.folder-grid { grid-template-columns: 1fr; } .file-card-preview { height: 118px; } }
 
 a {
   color: inherit;
@@ -69,3 +76,14 @@ img {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---------- Folder path (components/Breadcrumb.jsx) ---------- */
+.breadcrumb-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 8px 0 16px; }
+.bc-item { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.bc-sep { padding: 0 2px; color: var(--text-secondary, #444746); font-size: 1.1rem; }
+.bc-link, .bc-current { max-width: 220px; overflow: hidden; padding: 5px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-secondary, #444746); font: inherit; font-size: 1.05rem; text-overflow: ellipsis; white-space: nowrap; }
+.bc-link { cursor: pointer; }
+.bc-link:hover { background: var(--nav-hover, rgba(68, 71, 70, 0.08)); color: var(--text-primary, #1f1f1f); }
+.bc-current { color: var(--text-primary, #1f1f1f); font-weight: 500; }
+.breadcrumb-path .btn { margin-left: 8px; padding: 4px 12px; font-size: 0.8rem; }
+@media (max-width: 768px) { .bc-link, .bc-current { max-width: 140px; font-size: 0.95rem; } }

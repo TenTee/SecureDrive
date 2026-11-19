@@ -11,8 +11,8 @@ const TYPES = [
   ["pptx", "docTypePowerPoint"],
 ];
 
-export default function NewDocumentModal({ parent, onClose, onCreated }) {
-  const [type, setType] = useState("docx");
+export default function NewDocumentModal({ parent, initialType, onClose, onCreated }) {
+  const [type, setType] = useState(TYPES.some(([value]) => value === initialType) ? initialType : "docx");
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");

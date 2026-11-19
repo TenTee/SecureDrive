@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import Topbar from "./Topbar.jsx";
-import UploadFile from "./UploadFile.jsx";
+import NewMenu from "../components/NewMenu.jsx";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
 import "./AdminDashboard.css";
@@ -158,7 +158,6 @@ export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [darkMode, setDarkMode] = useState(false);
-  const [uploadOpen, setUploadOpen] = useState(false);
   const [files, setFiles] = useState([]);
   const [filesLoading, setFilesLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -200,8 +199,16 @@ export default function AdminLayout() {
     }
 
     try {
+      // Keep storage stats already loaded: this effect re-runs on navigation.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setUser(buildDisplayUser(JSON.parse(rawUser)));
+      setUser((current) => ({
+        ...buildDisplayUser(JSON.parse(rawUser)),
+        ...(current && {
+          storageUsedBytes: current.storageUsedBytes,
+          storageUsedGB: current.storageUsedGB,
+          filesOwned: current.filesOwned,
+        }),
+      }));
     } catch {
       redirectToLogin();
     }
@@ -366,7 +373,8 @@ export default function AdminLayout() {
         aria-hidden={!sidebarOpen}
       />
 
-      <Sidebar user={user} onNavigate={() => setSidebarOpen(false)} />
+      <Sidebar user={user} uploadFile={uploadFile} onNavigate={() => setSidebarOpen(false)} />
+      <NewMenu user={user} uploadFile={uploadFile} variant="fab" />
 
       <div className="admin-main">
         <Topbar
@@ -375,31 +383,13 @@ export default function AdminLayout() {
           user={user}
           darkMode={darkMode}
           onToggleDarkMode={() => setDarkMode((d) => !d)}
-          onUploadClick={meta.upload ? () => setUploadOpen(true) : null}
+          onUploadClick={null}
           onMenuClick={() => setSidebarOpen((v) => !v)}
         />
         <div className="admin-content">
           <Outlet context={{ user, files, addFile, filesLoading, setFiles, uploadFile }} />
         </div>
       </div>
-
-      {uploadOpen && (
-        <UploadFile
-          onClose={() => setUploadOpen(false)}
-          onUpload={addFile}
-          onUploadFile={(file) => uploadFile(file, `uploads/${user.userId}/`, (data) => {
-            addFile({
-              id: data.fileKey,
-              name: data.fileName,
-              type: "file",
-              size: data.size,
-              modified: "Just now",
-              starred: false,
-              fileKey: data.fileKey,
-            });
-          })}
-        />
-      )}
 
       {uploadTransfer && <UploadProgress transfer={uploadTransfer} onCancel={cancelUpload} />}
     </div>

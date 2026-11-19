@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { t } from "../i18n.js";
 import { API_BASE } from "../config.js";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import FileCard from "../components/FileCard.jsx";
+import Breadcrumb from "../components/Breadcrumb.jsx";
 import ActionModal from "../components/shared/ActionModal.jsx";
 import { isOfficeFile, openInEditor } from "../office.js";
 
@@ -54,6 +55,7 @@ function getUserRootPath(user) {
 
 export default function MyFiles() {
   const outlet = useOutletContext() || {};
+  const [searchParams, setSearchParams] = useSearchParams();
   const user = outlet.user;
   const setFilesGlobal = outlet.setFiles;
   const uploadFile = outlet.uploadFile;
@@ -100,6 +102,47 @@ export default function MyFiles() {
     window.addEventListener("sd-lang-change", onLang);
     return () => window.removeEventListener("sd-lang-change", onLang);
   }, []);
+
+  // Sidebar "+ New" menu: run the action in the folder shown here.
+  function runNewAction(action) {
+    if (action === "folder") setFolderModal(true);
+    else if (action === "upload") {
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = "";
+        uploadInputRef.current.click();
+      }
+    } else if (["docx", "xlsx", "pptx"].includes(action)) {
+      setDocType(action);
+      setDocModal(true);
+    }
+  }
+
+  useEffect(() => {
+    function onNew(event) {
+      event.preventDefault();
+      runNewAction(event.detail?.action);
+    }
+    window.addEventListener("sd-new", onNew);
+    return () => window.removeEventListener("sd-new", onNew);
+  }, []);
+
+  // Coming from another page through the "+ New" menu: /admin/files?new=folder
+  useEffect(() => {
+    const action = searchParams.get("new");
+    if (!action) return;
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (action !== "upload") runNewAction(action);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // A file was uploaded from the sidebar while this page was open.
+  useEffect(() => {
+    const onChanged = () => load(path);
+    window.addEventListener("sd-files-changed", onChanged);
+    return () => window.removeEventListener("sd-files-changed", onChanged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
 
   function showToast(message, type = "ok") {
     // eslint-disable-next-line react-hooks/purity
@@ -290,7 +333,7 @@ export default function MyFiles() {
       }
       setDocName("");
       setDocModal(false);
-      showToast(`"${data.fileName}" created`);
+      showToast(t("docDraftHint").replace("{name}", data.fileName));
       load(path);
       if (editorTab) editorTab.location.href = `/editor?key=${encodeURIComponent(data.fileKey)}`;
       else openInEditor(data.fileKey);
@@ -761,77 +804,6 @@ export default function MyFiles() {
           gap: 8px;
           flex-wrap: wrap;
         }
-        .myfiles-breadcrumb {
-          margin: 12px 0 16px;
-          font-size: 0.9rem;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          flex-wrap: wrap;
-        }
-        .file-card-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-          gap: 14px;
-          padding: 18px;
-        }
-        .file-card {
-          position: relative;
-          min-width: 0;
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          background: #fff;
-          transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
-        }
-        .file-card:hover {
-          transform: translateY(-2px);
-          border-color: #cbd5e1;
-          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
-        }
-        .file-card-preview {
-          display: flex;
-          width: 100%;
-          height: 142px;
-          align-items: center;
-          justify-content: center;
-          border: 0;
-          border-bottom: 1px solid #eef2f7;
-          background: linear-gradient(135deg, #f8fafc, #eef2ff);
-          cursor: pointer;
-        }
-        .file-card-thumbnail { width: 100%; height: 100%; object-fit: cover; }
-        .file-card-details { padding: 12px 42px 13px 13px; }
-        .file-card-name { overflow: hidden; color: #0f172a; font-size: 0.9rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-        .file-card-meta { margin-top: 5px; color: #64748b; font-size: 0.78rem; }
-        .file-card-favorite { margin-right: 5px; color: #f59e0b; }
-        .file-card-menu { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 8px; background: rgba(255,255,255,0.92); color: #475569; cursor: pointer; font-size: 18px; line-height: 1; padding: 6px 9px; }
-        .file-card-menu:hover { background: #fff; color: #0f172a; }
-        .menu-floating {
-          position: fixed;
-          z-index: 10050;
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          box-shadow: 0 12px 40px rgba(15,23,42,0.18);
-          min-width: 200px;
-          padding: 6px;
-          text-align: left;
-        }
-        .menu-floating button {
-          display: block;
-          width: 100%;
-          text-align: left;
-          padding: 11px 14px;
-          border: none;
-          background: transparent;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 0.9rem;
-          color: #0f172a;
-        }
-        .menu-floating button:hover { background: #f1f5f9; }
-        .menu-floating button.danger { color: #dc2626; }
         @media (max-width: 768px) {
           .myfiles-header {
             flex-direction: column;
@@ -845,11 +817,6 @@ export default function MyFiles() {
           }
           .page-heading { font-size: 1.35rem !important; }
           .page-subtext { font-size: 0.85rem; }
-          .file-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 10px; }
-          .file-card-preview { height: 112px; }
-          .menu-floating {
-            min-width: min(240px, calc(100vw - 24px));
-          }
         }
       `}</style>
 
@@ -891,64 +858,32 @@ export default function MyFiles() {
           <h2 className="page-heading">{t("myFilesTitle")}</h2>
           <p className="page-subtext">{t("myFilesSub")}</p>
         </div>
-        <div className="myfiles-actions">
-          <input
-            ref={uploadInputRef}
-            type="file"
-            accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json,.zip,.txt,.css,.js"
-            hidden
-            onChange={handleUploadHere}
-          />
-          <button
-            className="btn btn-outline"
-            type="button"
-            onClick={() => {
-              if (uploadInputRef.current) {
-                uploadInputRef.current.value = "";
-                uploadInputRef.current.click();
-              }
-            }}
-          >
-            {t("uploadHere")}
-          </button>
-          <button className="btn btn-outline" type="button" onClick={() => setDocModal(true)}>
-            + {t("newDocument")}
-          </button>
-          <button className="btn btn-solid" type="button" onClick={() => setFolderModal(true)}>
-            + {t("newFolder")}
-          </button>
-        </div>
+        {/* Creation and upload go through the sidebar "+ New" menu (event "sd-new"). */}
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.json,.zip,.txt,.css,.js"
+          hidden
+          onChange={handleUploadHere}
+        />
       </div>
 
-      <div className="myfiles-breadcrumb">
-        <button
-          type="button"
-          className="btn btn-outline"
-          style={{ padding: "4px 10px", fontSize: "0.8rem" }}
-          onClick={() => {
-            setPath(root);
-            load(root);
-          }}
-        >
-          {t("myFiles")}
-        </button>
-        {crumbs.map((c, i) => (
-          <span key={`${c}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ opacity: 0.5 }}>/</span>
-            <span style={{ fontWeight: i === crumbs.length - 1 ? 600 : 400 }}>{c}</span>
-          </span>
-        ))}
+      <Breadcrumb
+        items={[
+          { label: t("myFiles"), onClick: () => openFolder(root) },
+          ...crumbs.map((c, i) => {
+            const base = path.startsWith(root) ? root : "";
+            const folderKey = `${base}${crumbs.slice(0, i + 1).join("/")}/`;
+            return { label: c, onClick: () => openFolder(folderKey) };
+          }),
+        ]}
+      >
         {canGoUp && (
-          <button
-            type="button"
-            className="btn btn-outline"
-            style={{ padding: "4px 10px", fontSize: "0.8rem", marginLeft: 4 }}
-            onClick={goUp}
-          >
+          <button type="button" className="btn btn-outline" onClick={goUp}>
             ↑ {t("up")}
           </button>
         )}
-      </div>
+      </Breadcrumb>
 
       {error && (
         <div style={{ color: "#ef4444", marginBottom: 12, fontSize: "0.85rem" }}>{error}</div>
@@ -994,22 +929,36 @@ export default function MyFiles() {
             <div className="empty-state-text">{t("emptyFolderHint")}</div>
           </div>
         ) : (
-          <div className="file-card-grid">
-            {folders.map((folder) => (
-              <FileCard
-                key={folder.key}
-                item={folder}
-                folder
-                onOpen={openFolder}
-                onMenu={openMenu}
-                dropHint={t("dropFilesIntoFolder")}
-                onFileDrop={(droppedFiles) => uploadDroppedFiles(droppedFiles, folder.key)}
-              />
-            ))}
-            {files.map((file) => (
-              <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} previewable={canPreview(file.name) || isOfficeFile(file.name)} onOpen={handlePreview} onMenu={openMenu} />
-            ))}
-          </div>
+          <>
+            {folders.length > 0 && (
+              <>
+                <div className="file-section-title">{t("foldersSection")}</div>
+                <div className="file-card-grid folder-grid">
+                  {folders.map((folder) => (
+                    <FileCard
+                      key={folder.key}
+                      item={folder}
+                      folder
+                      onOpen={openFolder}
+                      onMenu={openMenu}
+                      dropHint={t("dropFilesIntoFolder")}
+                      onFileDrop={(droppedFiles) => uploadDroppedFiles(droppedFiles, folder.key)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+            {files.length > 0 && (
+              <>
+                <div className="file-section-title">{t("filesSection")}</div>
+                <div className="file-card-grid">
+                  {files.map((file) => (
+                    <FileCard key={file.key} item={file} favorite={favoriteKeys.has(file.key)} previewable={canPreview(file.name) || isOfficeFile(file.name)} onOpen={handlePreview} onMenu={openMenu} />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
 
