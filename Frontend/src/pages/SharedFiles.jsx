@@ -90,6 +90,25 @@ export default function SharedFiles() {
     }
   }
 
+  async function duplicateFile(fileKey) {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: fileKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not duplicate file");
+        return;
+      }
+      alert(t("duplicateSuccess").replace("{name}", data.fileName));
+    } catch {
+      alert("Cannot connect to server");
+    }
+  }
+
   async function handleRename(item) {
     setRenameTarget(item);
   }
@@ -150,7 +169,7 @@ export default function SharedFiles() {
               const name = item.file_name || "file";
               const folder = item.isFolder === true || item.file_key?.endsWith("/");
               const type = guessType(name);
-              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && (type !== "file" || isOfficeFile(name))} onOpen={(file) => (isOfficeFile(file.name) ? openInEditor(file.key) : setPreviewModal({ key: file.key, name: file.name }))} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<>{!folder && <button className="btn btn-outline" onClick={() => copyFileLink(item.file_key)}>{t("copyLink")}</button>}<button className="btn btn-outline" onClick={() => handleRename(item)}>{t("rename")}</button><button className="btn btn-outline" onClick={() => setRemoveTarget(item)}>{t("removeAccess")}</button></>} />;
+              return <FileCard key={item.id} item={{ key: item.file_key, name, type, sizeLabel: `${permLabel(item.permission)} · ${formatDate(item.created_at)}` }} folder={folder} showMenu={false} previewable={!folder && (type !== "file" || isOfficeFile(name))} onOpen={(file) => (isOfficeFile(file.name) ? openInEditor(file.key) : setPreviewModal({ key: file.key, name: file.name }))} meta={`${item.target_first_name || ""} ${item.target_last_name || ""}`.trim() || item.target_email} actions={<>{!folder && <><button className="btn btn-outline" onClick={() => copyFileLink(item.file_key)}>{t("copyLink")}</button><button className="btn btn-outline" onClick={() => duplicateFile(item.file_key)}>{t("duplicate")}</button></> }<button className="btn btn-outline" onClick={() => handleRename(item)}>{t("rename")}</button><button className="btn btn-outline" onClick={() => setRemoveTarget(item)}>{t("removeAccess")}</button></>} />;
             })}
           </div>
         )}

@@ -190,6 +190,55 @@ router.post("/rename", requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/files/duplicate
+router.post("/duplicate", requireAuth, async (req, res) => {
+  try {
+    const { key } = req.body;
+    if (typeof key !== "string" || !key.startsWith("uploads/") || key === "uploads/" || key.endsWith("/") || key.endsWith(".keep")) {
+      return res.status(400).json({ error: "Only files in uploads/ can be duplicated" });
+    }
+    if (!(await canAccessKey(key, req.user))) {
+      return res.status(403).json({ error: "You don't have permission to duplicate this file." });
+    }
+
+    const s3 = await getTemporaryS3Client(`user-${req.user.userId}`);
+    if (!(await objectExists(s3, key))) return res.status(404).json({ error: "File not found" });
+
+    const sourceLeaf = key.split("/").pop();
+    const sourceName = sourceLeaf.replace(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i,
+      ""
+    );
+    const extensionIndex = sourceName.lastIndexOf(".");
+    const copyName = extensionIndex > 0
+      ? `${sourceName.slice(0, extensionIndex)} (copy)${sourceName.slice(extensionIndex)}`
+      : `${sourceName} (copy)`;
+    const safeName = sanitizeFileName(copyName);
+    const destinationPath = key.startsWith(`uploads/${req.user.userId}/`)
+      ? key.slice(0, key.lastIndexOf("/") + 1)
+      : `uploads/${req.user.userId}/`;
+    const fileKey = `${destinationPath}${crypto.randomUUID()}-${safeName}`;
+
+    await s3.send(new CopyObjectCommand({
+      Bucket: BUCKET_NAME,
+      CopySource: encodeCopySource(key),
+      Key: fileKey,
+      MetadataDirective: "COPY",
+    }));
+
+    await logActivity({
+      userId: req.user.userId,
+      userName: req.user.email || `User #${req.user.userId}`,
+      action: "Duplicated a file",
+      detail: `${key} → ${fileKey}`,
+    });
+    res.status(201).json({ message: "File duplicated", fileKey, fileName: safeName });
+  } catch (err) {
+    console.error("Duplicate error:", err.message);
+    res.status(500).json({ error: "Could not duplicate file", details: err.message });
+  }
+});
+
 // GET /api/files?path=
 router.get("/", requireAuth, async (req, res) => {
   try {

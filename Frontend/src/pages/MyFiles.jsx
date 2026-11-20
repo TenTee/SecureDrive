@@ -443,6 +443,27 @@ export default function MyFiles() {
     }
   }
 
+  async function duplicateFile(file) {
+    setMenu(null);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: file.key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || "Could not duplicate file", "error");
+        return;
+      }
+      showToast(t("duplicateSuccess").replace("{name}", data.fileName));
+      load(path);
+    } catch {
+      showToast("Cannot connect to server", "error");
+    }
+  }
+
   async function renameItem(item) {
     setMenu(null);
     setRenameTarget(item);
@@ -1008,6 +1029,9 @@ export default function MyFiles() {
               )}
               <button type="button" onClick={() => requestDownload(menu.item)}>
                 {t("download")}
+              </button>
+              <button type="button" onClick={() => duplicateFile(menu.item)}>
+                {t("duplicate")}
               </button>
               <button type="button" onClick={() => renameItem(menu.item)}>{t("rename")}</button>
               <button type="button" onClick={() => copyFileLink(menu.item)}>

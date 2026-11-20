@@ -405,6 +405,26 @@ export default function SharedWithMe() {
     }
   }
 
+  async function duplicateFile(file) {
+    setMenu(null);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(`${API_BASE}/api/files/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: file.key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Could not duplicate file");
+        return;
+      }
+      alert(t("duplicateSuccess").replace("{name}", data.fileName));
+    } catch {
+      alert("Cannot connect to server");
+    }
+  }
+
   async function renameSharedItem(item) {
     setMenu(null);
     setRenameTarget(item);
@@ -494,7 +514,7 @@ export default function SharedWithMe() {
     const menuWidth = 210;
     let left = Math.max(8, rect.right - menuWidth);
     if (left + menuWidth > window.innerWidth - 8) left = window.innerWidth - menuWidth - 8;
-    const estimatedHeight = isFolder ? 220 : 310;
+    const estimatedHeight = isFolder ? 220 : 350;
     let top = rect.bottom + 4;
     if (top + estimatedHeight > window.innerHeight - 8) top = Math.max(8, rect.top - estimatedHeight - 4);
     setMenu({ item, isFolder, permission: item.permission || browsePerm, top, left });
@@ -528,6 +548,7 @@ export default function SharedWithMe() {
             {isOfficeFile(item.name) && <button type="button" onClick={() => { setMenu(null); openInEditor(item.key); }}>{t("openInEditor")}</button>}
             {canPreview && <button type="button" onClick={() => { setMenu(null); setPreviewModal({ key: item.key, name: item.name }); }}>{t("preview")}</button>}
             <button type="button" onClick={() => { setMenu(null); handleDownload(item.key, item.name); }}>{t("download")}</button>
+            <button type="button" onClick={() => duplicateFile(item)}>{t("duplicate")}</button>
             <button type="button" onClick={() => { setMenu(null); copyFileLink(item.key); }}>{t("copyLink")}</button>
             {canWrite && <button type="button" onClick={() => renameSharedItem(item)}>{t("rename")}</button>}
             {canWrite && <button type="button" onClick={() => { setMenu(null); startReplace({ file_key: item.key, id: item.id || item.key }); }}>{t("updateFile")}</button>}
